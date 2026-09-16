@@ -10,7 +10,7 @@ from datetime import datetime
 FIREBASE_URL = "https://pharmacie-app-default-rtdb.firebaseio.com"
 
 def charger_meds_cloud():
-    """Récupère les médicaments depuis le cloud Firebase sous forme de liste propre."""
+    """Récupère les médicaments depuis Firebase."""
     try:
         res = requests.get(f"{FIREBASE_URL}/medicaments.json")
         if res.status_code == 200 and res.json():
@@ -29,14 +29,17 @@ def charger_meds_cloud():
     return []
 
 def sauvegarder_med_cloud(nouveau_med):
-    """Ajoute un nouveau médicament directement dans Firebase."""
+    """Ajoute un médicament directement dans Firebase et renvoie sa clé."""
     try:
-        requests.post(f"{FIREBASE_URL}/medicaments.json", data=json.dumps(nouveau_med))
+        res = requests.post(f"{FIREBASE_URL}/medicaments.json", data=json.dumps(nouveau_med))
+        if res.status_code == 200 and res.json():
+            return res.json().get('name')
     except Exception as e:
-        st.error(f"Erreur de connexion au serveur : {e}")
+        st.error(f"Erreur serveur : {e}")
+    return None
 
 def supprimer_med_cloud(firebase_key):
-    """Supprime un médicament via sa clé Firebase."""
+    """Supprime un médicament."""
     try:
         if firebase_key:
             requests.delete(f"{FIREBASE_URL}/medicaments/{firebase_key}.json")
@@ -50,21 +53,21 @@ def charger_categories_cloud():
         res = requests.get(f"{FIREBASE_URL}/categories.json")
         if res.status_code == 200 and res.json():
             data = res.json()
-            if isinstance(data, dict):
+            if isinstance(data, list):
+                return [c for c in data if c]
+            elif isinstance(data, dict):
                 return list(data.values())
-            elif isinstance(data, list):
-                return [c for c in data if c is not None]
     except Exception:
         pass
     return cats_par_defaut
 
 def sauvegarder_categories_cloud(categories):
-    """Met à jour les catégories sur Firebase sous forme de dictionnaire propre."""
+    """Écrase les catégories sur Firebase."""
     try:
-        cats_dict = {str(i): cat for i, cat in enumerate(categories)}
-        requests.put(f"{FIREBASE_URL}/categories.json", data=json.dumps(cats_dict))
-    except Exception as e:
-        st.error(f"Erreur d'enregistrement : {e}")
+        cats_propres = [c for c in categories if c]
+        requests.put(f"{FIREBASE_URL}/categories.json", data=json.dumps(cats_propres))
+    except Exception:
+        pass
 
 # Configuration de la page
 st.set_page_config(
@@ -75,15 +78,28 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CSS : STYLE SOMBRE + CONSERVATION DE LA BARRE NATIVE
+# INITIALISATION DES ÉTATS DANS SESSION_STATE
+# ---------------------------------------------------------
+if "categories" not in st.session_state:
+    st.session_state.categories = charger_categories_cloud()
+
+if "Toutes les catégories" not in st.session_state.categories:
+    st.session_state.categories.insert(0, "Toutes les catégories")
+
+if "cat_selectionnee" not in st.session_state:
+    st.session_state.cat_selectionnee = "Toutes les catégories"
+
+if "meds_liste" not in st.session_state:
+    st.session_state.meds_liste = charger_meds_cloud()
+
+# ---------------------------------------------------------
+# CSS
 # ---------------------------------------------------------
 st.markdown("""
     <style>
-    /* Masquer uniquement le footer basique et le bouton deploy */
     footer { display: none !important; }
     .stAppDeployButton { display: none !important; }
 
-    /* Style global sombre */
     .stApp { background-color: #121824 !important; color: #E2E8F0 !important; }
     
     .header-container {
@@ -250,16 +266,10 @@ else:
 with col_title:
     st.markdown(f'<div class="header-container"><h1 class="header-title">{titre_app}</h1></div>', unsafe_allow_html=True)
 
-# Synchronisation avec le Cloud
-categories_base = charger_categories_cloud()
-if "Toutes les catégories" not in categories_base:
-    categories_base.insert(0, "Toutes les catégories")
-
-meds_liste = charger_meds_cloud()
-
+# Traitement du DataFrame
 cols_attendues = ["ID", "Nom", "Categorie", "Symptomes", "Quantite", "Peremption", "firebase_key"]
-if meds_liste:
-    df_meds = pd.DataFrame(meds_liste)
+if st.session_state.meds_liste:
+    df_meds = pd.DataFrame(st.session_state.meds_liste)
     for col in cols_attendues:
         if col not in df_meds.columns:
             df_meds[col] = "" if col != "ID" and col != "Quantite" else 0
@@ -271,10 +281,7 @@ else:
 # ---------------------------------------------------------
 st.sidebar.title(T["cat_title"])
 
-if "cat_selectionnee" not in st.session_state:
-    st.session_state.cat_selectionnee = "Toutes les catégories"
-
-for c_fr in categories_base:
+for c_fr in st.session_state.categories:
     c_display = TRAD_CATS.get(c_fr, c_fr) if lang == "العربية" else c_fr
     prefix = "🔹 " if st.session_state.cat_selectionnee == c_fr else ""
     if st.sidebar.button(f"{prefix}{c_display}", key=f"btn_cat_{c_fr}"):
@@ -283,27 +290,27 @@ for c_fr in categories_base:
 
 st.sidebar.markdown("---")
 
+# Ajouter une catégorie
 with st.sidebar.expander(T["add_cat"]):
     nouvelle_cat = st.text_input("Name", placeholder=T["add_cat_ph"], label_visibility="collapsed", key="input_new_cat")
     if st.button(T["add_cat_btn"], key="btn_add_cat"):
-        if nouvelle_cat.strip() != "" and nouvelle_cat not in categories_base:
-            categories_base.append(nouvelle_cat.strip())
-            sauvegarder_categories_cloud(categories_base)
+        val = nouvelle_cat.strip()
+        if val != "" and val not in st.session_state.categories:
+            st.session_state.categories.append(val)
+            sauvegarder_categories_cloud(st.session_state.categories)
             st.rerun()
 
+# Supprimer une catégorie
 with st.sidebar.expander(T["del_cat"]):
-    cats_supprimables = [c for c in categories_base if c != "Toutes les catégories"]
+    cats_supprimables = [c for c in st.session_state.categories if c != "Toutes les catégories"]
     
     if cats_supprimables:
-        cat_map = {TRAD_CATS.get(c, c) if lang == "العربية" else c: c for c in cats_supprimables}
-        cat_to_del_display = st.selectbox("Select", list(cat_map.keys()), label_visibility="collapsed", key="select_del_cat")
-        
+        cat_to_del = st.selectbox("Select", cats_supprimables, label_visibility="collapsed", key="select_del_cat")
         if st.button(T["del_cat_btn"], key="btn_del_cat"):
-            cat_to_del_real = cat_map[cat_to_del_display]
-            if cat_to_del_real in categories_base:
-                categories_base.remove(cat_to_del_real)
-                sauvegarder_categories_cloud(categories_base)
-                if st.session_state.cat_selectionnee == cat_to_del_real:
+            if cat_to_del in st.session_state.categories:
+                st.session_state.categories.remove(cat_to_del)
+                sauvegarder_categories_cloud(st.session_state.categories)
+                if st.session_state.cat_selectionnee == cat_to_del:
                     st.session_state.cat_selectionnee = "Toutes les catégories"
                 st.rerun()
 
@@ -325,10 +332,8 @@ if st.session_state.afficher_formulaire:
             
             with col1:
                 nom_med = st.text_input(T["nom_med"])
-                cat_choices_fr = [c for c in categories_base if c != "Toutes les catégories"]
-                cat_map_form = {TRAD_CATS.get(c, c) if lang == "العربية" else c: c for c in cat_choices_fr}
-                
-                cat_med_display = st.selectbox(T["cat_label"], list(cat_map_form.keys()) if cat_map_form else ["Autre"])
+                cat_choices = [c for c in st.session_state.categories if c != "Toutes les catégories"]
+                cat_med = st.selectbox(T["cat_label"], cat_choices if cat_choices else ["Autre"])
                 symptomes_med = st.text_area(T["sympt_label"], placeholder=T["sympt_ph"])
             
             with col2:
@@ -345,19 +350,24 @@ if st.session_state.afficher_formulaire:
                 if nom_med.strip() == "":
                     st.error("Nom obligatoire.")
                 else:
-                    cat_final_fr = cat_map_form.get(cat_med_display, cat_med_display)
                     nouveau_id = 1 if df_meds.empty or "ID" not in df_meds.columns else int(pd.to_numeric(df_meds["ID"], errors='coerce').fillna(0).max()) + 1
                     
                     nouveau_med_dict = {
                         "ID": nouveau_id,
                         "Nom": nom_med.strip(),
-                        "Categorie": cat_final_fr,
+                        "Categorie": cat_med,
                         "Symptomes": symptomes_med.strip(),
                         "Quantite": int(quantite_med),
                         "Peremption": str(peremption_med)
                     }
                     
-                    sauvegarder_med_cloud(nouveau_med_dict)
+                    # 1. Sauvegarde dans Firebase
+                    fb_key = sauvegarder_med_cloud(nouveau_med_dict)
+                    if fb_key:
+                        nouveau_med_dict['firebase_key'] = fb_key
+                    
+                    # 2. Mise à jour immédiate de la mémoire session_state
+                    st.session_state.meds_liste.append(nouveau_med_dict)
                     st.session_state.afficher_formulaire = False
                     st.rerun()
             
@@ -444,4 +454,6 @@ else:
         
         if st.button(f"{T['del_med']} {row['Nom']}", key=f"del_med_btn_{row.get('firebase_key', idx)}"):
             supprimer_med_cloud(row.get('firebase_key'))
+            # Retrait immédiat de la mémoire
+            st.session_state.meds_liste = [m for m in st.session_state.meds_liste if m.get('firebase_key') != row.get('firebase_key')]
             st.rerun()
