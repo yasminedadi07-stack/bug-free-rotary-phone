@@ -19,7 +19,7 @@ def charger_meds_cloud():
             if isinstance(data, dict):
                 for key, val in data.items():
                     if isinstance(val, dict):
-                        val['firebase_key'] = key  # Conserver la clé Firebase pour la suppression
+                        val['firebase_key'] = key
                         liste_resultat.append(val)
                 return liste_resultat
             elif isinstance(data, list):
@@ -66,7 +66,7 @@ def sauvegarder_categories_cloud(categories):
     except Exception as e:
         st.error(f"Erreur d'enregistrement : {e}")
 
-# Configuration de la page (Forcer la barre latérale ouverte sur mobile)
+# Configuration de la page
 st.set_page_config(
     page_title="Pharmacie", 
     page_icon="💊", 
@@ -75,25 +75,47 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CSS : MASQUAGE DES LOGOS ROUGES ET BRANDING STREAMLIT
+# CSS : MASQUAGE TOTAL DU BADGE DU BAS ET DES LOGOS STREAMLIT
 # ---------------------------------------------------------
 st.markdown("""
     <style>
-    /* Masquer le menu hamburger à droite, le footer et le bouton Deploy */
-    #MainMenu { visibility: hidden !important; display: none !important; }
-    footer { visibility: hidden !important; display: none !important; }
-    .stAppDeployButton { display: none !important; }
+    /* 1. MASQUER LE FOOTER ET LE BADGE STREAMLIT EN BAS */
+    footer { display: none !important; visibility: hidden !important; }
+    .viewerBadge_container__1S-S7, 
+    .viewerBadge_link__1S-S7, 
+    [data-testid="stStatusWidget"],
+    [data-testid="stAppDeployButton"],
+    div[class*="viewerBadge"],
+    div[class*="styles_viewerBadge"],
+    a[href*="streamlit.io"] {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+    }
+
+    /* 2. MASQUER LE MENU HAMBURGER HAUT DROITE ET BARRE GITHUB */
+    #MainMenu { display: none !important; }
     div[data-testid="stDecoration"] { display: none !important; }
-    div[data-testid="stStatusWidget"] { display: none !important; }
     div[data-testid="stToolbar"] { display: none !important; }
     button[title="View source"] { display: none !important; }
-    .viewerBadge_container__1S-S7 { display: none !important; }
     a[href*="github.com"] { display: none !important; }
     
-    /* Conserver l'en-tête transparent pour préserver le bouton de la flèche (Sidebar Toggle) */
+    /* 3. CONSERVER LA FLÈCHE DU MENU EN HAUT À GAUCHE */
     header[data-testid="stHeader"] {
-        background-color: transparent !important;
-        z-index: 99999 !important;
+        background: transparent !important;
+        z-index: 999999 !important;
+    }
+
+    button[data-testid="stSidebarCollapseButton"], 
+    button[data-testid="baseButton-header"] {
+        visibility: visible !important;
+        display: inline-flex !important;
+        color: #60A5FA !important;
+        background-color: #0F172A !important;
+        border: 1px solid #334155 !important;
+        border-radius: 8px !important;
+        z-index: 999999 !important;
     }
 
     /* Style global sombre */
@@ -270,7 +292,6 @@ if "Toutes les catégories" not in categories_base:
 
 meds_liste = charger_meds_cloud()
 
-# Initialisation sûre du DataFrame
 cols_attendues = ["ID", "Nom", "Categorie", "Symptomes", "Quantite", "Peremption", "firebase_key"]
 if meds_liste:
     df_meds = pd.DataFrame(meds_liste)
@@ -447,7 +468,6 @@ else:
     for idx, row in df_affiche.iterrows():
         cat_card = TRAD_CATS.get(row['Categorie'], row['Categorie']) if lang == "العربية" else row['Categorie']
         
-        # Affichage de la carte de médicament
         st.markdown(f"""
             <div class="med-card">
                 <h3 style="margin:0; color:#60A5FA;">💊 {row['Nom']}</h3>
@@ -457,7 +477,6 @@ else:
             </div>
         """, unsafe_allow_html=True)
         
-        # Bouton de suppression individuelle propre sous la carte
         if st.button(f"{T['del_med']} {row['Nom']}", key=f"del_med_btn_{row.get('firebase_key', idx)}"):
             supprimer_med_cloud(row.get('firebase_key'))
             st.rerun()
