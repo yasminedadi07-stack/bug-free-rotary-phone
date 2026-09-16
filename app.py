@@ -75,11 +75,11 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CSS : MASQUAGE COMPLET DES LOGOS STREAMLIT / GITHUB & DESIGN
+# CSS : MASQUAGE DES LOGOS ROUGES ET BRANDING STREAMLIT
 # ---------------------------------------------------------
 st.markdown("""
     <style>
-    /* Masquer tous les logos, menus, liens GitHub et footers de Streamlit */
+    /* Masquer le menu hamburger à droite, le footer et le bouton Deploy */
     #MainMenu { visibility: hidden !important; display: none !important; }
     footer { visibility: hidden !important; display: none !important; }
     .stAppDeployButton { display: none !important; }
@@ -90,7 +90,7 @@ st.markdown("""
     .viewerBadge_container__1S-S7 { display: none !important; }
     a[href*="github.com"] { display: none !important; }
     
-    /* Conserver l'en-tête transparent pour laisser la flèche du menu accessible */
+    /* Conserver l'en-tête transparent pour préserver le bouton de la flèche (Sidebar Toggle) */
     header[data-testid="stHeader"] {
         background-color: transparent !important;
         z-index: 99999 !important;
@@ -224,7 +224,7 @@ if lang == "العربية":
         "low_qty_title": "📉 أدوية على وشك النفاد",
         "no_expired": "✅ لا توجد أدوية منتهية الصلاحية.",
         "no_low": "✅ جميع الكميات متوفرة.",
-        "del_med": "🗑️ حذف الدواء"
+        "del_med": "🗑️ حذف"
     }
 else:
     titre_app = "💊 PHARMACIE"
@@ -263,7 +263,7 @@ else:
 with col_title:
     st.markdown(f'<div class="header-container"><h1 class="header-title">{titre_app}</h1></div>', unsafe_allow_html=True)
 
-# Synchronisation sécurisée avec le Cloud
+# Synchronisation avec le Cloud
 categories_base = charger_categories_cloud()
 if "Toutes les catégories" not in categories_base:
     categories_base.insert(0, "Toutes les catégories")
@@ -309,7 +309,6 @@ with st.sidebar.expander(T["del_cat"]):
     cats_supprimables = [c for c in categories_base if c != "Toutes les catégories"]
     
     if cats_supprimables:
-        # Map d'affichage sécurisée
         cat_map = {TRAD_CATS.get(c, c) if lang == "العربية" else c: c for c in cats_supprimables}
         cat_to_del_display = st.selectbox("Select", list(cat_map.keys()), label_visibility="collapsed", key="select_del_cat")
         
@@ -421,7 +420,7 @@ with col_stat2:
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 5. LISTE PRINCIPALE DES MÉDICAMENTS (AVEC SUPPRESSION INCLUSE)
+# 5. LISTE PRINCIPALE DES MÉDICAMENTS
 # ---------------------------------------------------------
 cat_current_display = TRAD_CATS.get(st.session_state.cat_selectionnee, st.session_state.cat_selectionnee) if lang == "العربية" else st.session_state.cat_selectionnee
 st.subheader(f"{T['stock_title']} {cat_current_display}")
@@ -448,18 +447,17 @@ else:
     for idx, row in df_affiche.iterrows():
         cat_card = TRAD_CATS.get(row['Categorie'], row['Categorie']) if lang == "العربية" else row['Categorie']
         
-        col_card, col_btn = st.columns([5, 1])
-        with col_card:
-            st.markdown(f"""
-                <div class="med-card">
-                    <h3 style="margin:0; color:#60A5FA;">💊 {row['Nom']}</h3>
-                    <p style="margin:5px 0;">🎯 <b>{T['sympt_card']} :</b> {row['Symptomes']}</p>
-                    <p style="margin:5px 0;">🏷️ <b>{T['cat_card']} :</b> {cat_card}</p>
-                    <p style="margin:5px 0;">📦 <b>{T['qty_card']} :</b> {row['Quantite']} | 📅 <b>{T['peremp_card']} :</b> {row['Peremption']}</p>
-                </div>
-            """, unsafe_allow_html=True)
-        with col_btn:
-            # Bouton de suppression individuelle de médicament
-            if st.button("🗑️", key=f"del_med_btn_{row.get('firebase_key', idx)}"):
-                supprimer_med_cloud(row.get('firebase_key'))
-                st.rerun()
+        # Affichage de la carte de médicament
+        st.markdown(f"""
+            <div class="med-card">
+                <h3 style="margin:0; color:#60A5FA;">💊 {row['Nom']}</h3>
+                <p style="margin:5px 0;">🎯 <b>{T['sympt_card']} :</b> {row['Symptomes']}</p>
+                <p style="margin:5px 0;">🏷️ <b>{T['cat_card']} :</b> {cat_card}</p>
+                <p style="margin:5px 0;">📦 <b>{T['qty_card']} :</b> {row['Quantite']} | 📅 <b>{T['peremp_card']} :</b> {row['Peremption']}</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Bouton de suppression individuelle propre sous la carte
+        if st.button(f"{T['del_med']} {row['Nom']}", key=f"del_med_btn_{row.get('firebase_key', idx)}"):
+            supprimer_med_cloud(row.get('firebase_key'))
+            st.rerun()
