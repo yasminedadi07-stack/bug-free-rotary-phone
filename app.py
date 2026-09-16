@@ -15,7 +15,6 @@ def charger_meds_cloud():
         res = requests.get(f"{FIREBASE_URL}/medicaments.json")
         if res.status_code == 200 and res.json():
             data = res.json()
-            # Transformation du dictionnaire Firebase en Liste
             if isinstance(data, dict):
                 return list(data.values())
             return data
@@ -56,17 +55,23 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS : Masquer la barre native + Style sombre + Cartes + Masquer icône rouge Streamlit
+# CSS : Masquer les logos Streamlit TOUT EN GARDANT le bouton du menu (flèche) accessible
 st.markdown("""
     <style>
-    /* Masquer le logo rouge, le header et le footer Streamlit */
-    #MainMenu {visibility: hidden !important;}
-    footer {visibility: hidden !important;}
-    header {visibility: hidden !important;}
-    header[data-testid="stHeader"] { display: none !important; }
-    .stAppDeployButton {display:none !important;}
-    div[data-testid="stDecoration"] {display:none !important;}
+    /* Masquer le menu hamburger à droite, le bouton Deploy, le footer et la décoration rouge */
+    #MainMenu { visibility: hidden !important; }
+    footer { visibility: hidden !important; }
+    .stAppDeployButton { display: none !important; }
+    div[data-testid="stDecoration"] { display: none !important; }
+    div[data-testid="stStatusWidget"] { display: none !important; }
+    
+    /* Garder le header transparent pour conserver le bouton de la flèche du menu */
+    header[data-testid="stHeader"] {
+        background-color: transparent !important;
+        z-index: 99999 !important;
+    }
 
+    /* Style global sombre */
     .stApp { background-color: #121824 !important; color: #E2E8F0 !important; }
     
     .header-container {
@@ -329,7 +334,6 @@ if st.session_state.afficher_formulaire:
                         "Peremption": str(peremption_med)
                     }
                     
-                    # Envoi direct vers Firebase Cloud
                     sauvegarder_med_cloud(nouveau_med_dict)
                     st.session_state.afficher_formulaire = False
                     st.rerun()
