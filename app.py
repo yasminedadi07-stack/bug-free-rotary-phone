@@ -29,7 +29,7 @@ def charger_meds_cloud():
     return []
 
 def sauvegarder_med_cloud(nouveau_med):
-    """Ajoute un médicament directement dans Firebase et renvoie sa clé."""
+    """Ajoute un médicament dans Firebase."""
     try:
         res = requests.post(f"{FIREBASE_URL}/medicaments.json", data=json.dumps(nouveau_med))
         if res.status_code == 200 and res.json():
@@ -38,8 +38,16 @@ def sauvegarder_med_cloud(nouveau_med):
         st.error(f"Erreur serveur : {e}")
     return None
 
+def modifier_med_cloud(firebase_key, med_modifie):
+    """Met à jour un médicament existant dans Firebase."""
+    try:
+        if firebase_key:
+            requests.put(f"{FIREBASE_URL}/medicaments/{firebase_key}.json", data=json.dumps(med_modifie))
+    except Exception as e:
+        st.error(f"Erreur de modification : {e}")
+
 def supprimer_med_cloud(firebase_key):
-    """Supprime un médicament."""
+    """Supprime un médicament via sa clé Firebase."""
     try:
         if firebase_key:
             requests.delete(f"{FIREBASE_URL}/medicaments/{firebase_key}.json")
@@ -62,7 +70,7 @@ def charger_categories_cloud():
     return cats_par_defaut
 
 def sauvegarder_categories_cloud(categories):
-    """Écrase les catégories sur Firebase."""
+    """Sauvegarde la liste des catégories."""
     try:
         cats_propres = [c for c in categories if c]
         requests.put(f"{FIREBASE_URL}/categories.json", data=json.dumps(cats_propres))
@@ -78,8 +86,50 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# INITIALISATION DES ÉTATS DANS SESSION_STATE
+# Dictionnaires de traduction avancée (Symptômes & Catégories)
 # ---------------------------------------------------------
+TRAD_CATS = {
+    "Toutes les catégories": "جميع الفئات",
+    "Douleur & Fièvre": "الألم والحمى",
+    "Yeux & Oreilles": "العيون والأذن",
+    "جميع الفئات": "Toutes les catégories",
+    "الألم والحمى": "Douleur & Fièvre",
+    "العيون والأذن": "Yeux & Oreilles"
+}
+
+TRAD_MOTS = {
+    "fievre": "حمى", "fièvre": "حمى",
+    "douleur": "ألم", "tete": "صداع", "tête": "صداع",
+    "toux": "سعال", "yeux": "عيون", "oeil": "عين",
+    "oreille": "أذن", "oreilles": "أذن",
+    "doliprane": "دوليبران", "paracetamol": "باراسيتامول",
+    "حمى": "fievre", "الحمى": "fievre",
+    "ألم": "douleur", "الألم": "douleur", "وجع": "douleur",
+    "صداع": "tete", "الصداع": "tete", "رأس": "tete",
+    "سعال": "toux", "السعال": "toux",
+    "عين": "yeux", "العيون": "yeux",
+    "أذن": "oreille", "الأذن": "oreille"
+}
+
+def traduire_texte_symptomes(texte_symptomes, lang_target):
+    """Traduit dynamiquement les mots clés des symptômes selon la langue choisie."""
+    if not texte_symptomes or not isinstance(texte_symptomes, str):
+        return ""
+    
+    mots = texte_symptomes.replace(',', ' ').split()
+    mots_traduits = []
+    
+    for m in mots:
+        m_clean = m.lower().strip()
+        if lang_target == "العربية":
+            trad = TRAD_MOTS.get(m_clean, m)
+        else:
+            trad = TRAD_MOTS.get(m_clean, m)
+        mots_traduits.append(trad)
+        
+    return " ".join(mots_traduits)
+
+# Initialisation du Session State
 if "categories" not in st.session_state:
     st.session_state.categories = charger_categories_cloud()
 
@@ -91,6 +141,9 @@ if "cat_selectionnee" not in st.session_state:
 
 if "meds_liste" not in st.session_state:
     st.session_state.meds_liste = charger_meds_cloud()
+
+if "med_a_modifier" not in st.session_state:
+    st.session_state.med_a_modifier = None
 
 # ---------------------------------------------------------
 # CSS
@@ -128,7 +181,7 @@ st.markdown("""
         border-left: 5px solid #3B82F6 !important;
         padding: 18px;
         border-radius: 10px;
-        margin-bottom: 12px;
+        margin-bottom: 8px;
     }
     
     .alert-card-expired {
@@ -167,28 +220,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# DONNÉES ET DICO DE TRADUCTION
-# ---------------------------------------------------------
-TRAD_CATS = {
-    "Toutes les catégories": "جميع الفئات",
-    "Douleur & Fièvre": "الألم والحمى",
-    "Yeux & Oreilles": "العيون والأذن",
-    "جميع الفئات": "Toutes les catégories",
-    "الألم والحمى": "Douleur & Fièvre",
-    "العيون والأذن": "Yeux & Oreilles"
-}
-
-TRAD_MOTS = {
-    "حمى": "fievre", "الحمى": "fievre", "فليفر": "fievre",
-    "ألم": "douleur", "الألم": "douleur", "وجع": "douleur",
-    "صداع": "tete", "الصداع": "tete", "رأس": "tete",
-    "سعال": "toux", "السعال": "toux",
-    "عين": "yeux", "العيون": "yeux",
-    "أذن": "oreille", "الأذن": "oreille",
-    "دوليبران": "doliprane", "باراسيتامول": "paracetamol"
-}
-
-# ---------------------------------------------------------
 # 1. BARRE EN HAUT (TITRE CENTRÉ + TRADUCTION)
 # ---------------------------------------------------------
 col_empty, col_title, col_lang = st.columns([1, 4, 1])
@@ -206,16 +237,18 @@ if lang == "العربية":
         "add_cat_ph": "اسم الفئة...",
         "add_cat_btn": "تأكيد الإضافة",
         "del_cat_btn": "تأكيد الحذف",
-        "search_ph": "🔍 بحث...", 
+        "search_ph": "🔍 بحث عن دواء أو أعراض...", 
         "btn_add_med": "➕ إضافة دواء جديد",
         "form_title": "📝 نموذج إضافة دواء",
-        "nom_med": "اسم الدواء (بالفرنسية دائماً)",
+        "edit_title": "✏️ تعديل بيانات الدواء",
+        "nom_med": "اسم الدواء",
         "cat_label": "الفئة",
         "sympt_label": "الأعراض / دواعي الاستعمال",
         "sympt_ph": "مثال: Fièvre, Douleur أو الحمى، الصداع...",
         "qty_label": "الكمية",
         "peremp_label": "تاريخ انتهاء الصلاحية",
         "btn_save": "✅ حفظ",
+        "btn_update": "✅ تحديث",
         "btn_cancel": "❌ إلغاء",
         "stock_title": "📦 الفئة :",
         "no_med": "لا يوجد أي دواء.",
@@ -227,7 +260,8 @@ if lang == "العربية":
         "low_qty_title": "📉 أدوية على وشك النفاد",
         "no_expired": "✅ لا توجد أدوية منتهية الصلاحية.",
         "no_low": "✅ جميع الكميات متوفرة.",
-        "del_med": "🗑️ حذف"
+        "del_med": "🗑️ حذف",
+        "edit_med": "✏️ تعديل"
     }
 else:
     titre_app = "💊 PHARMACIE"
@@ -239,16 +273,18 @@ else:
         "add_cat_ph": "Nom de la catégorie...",
         "add_cat_btn": "Valider l'ajout",
         "del_cat_btn": "Confirmer la suppression",
-        "search_ph": "🔍 Recherche...",
+        "search_ph": "🔍 Recherche par médicament ou symptôme...",
         "btn_add_med": "➕ Ajouter un nouveau médicament",
         "form_title": "📝 Formulaire d'ajout de médicament",
-        "nom_med": "Nom du médicament (en Français)",
+        "edit_title": "✏️ Modifier le médicament",
+        "nom_med": "Nom du médicament",
         "cat_label": "Catégorie",
         "sympt_label": "Symptômes / Indications",
         "sympt_ph": "Ex: Fièvre, Douleur...",
         "qty_label": "Quantité",
         "peremp_label": "Date de péremption",
         "btn_save": "✅ Enregistrer",
+        "btn_update": "✅ Mettre à jour",
         "btn_cancel": "❌ Annuler",
         "stock_title": "📦 Catégorie :",
         "no_med": "Aucun médicament disponible.",
@@ -260,7 +296,8 @@ else:
         "low_qty_title": "📉 Stock Faible",
         "no_expired": "✅ Aucun médicament expiré.",
         "no_low": "✅ Tous les stocks sont suffisants.",
-        "del_med": "🗑️ Supprimer"
+        "del_med": "🗑️ Supprimer",
+        "edit_med": "✏️ Modifier"
     }
 
 with col_title:
@@ -315,7 +352,7 @@ with st.sidebar.expander(T["del_cat"]):
                 st.rerun()
 
 # ---------------------------------------------------------
-# 3. ESPACE PRINCIPAL : RECHERCHE ET FORMULAIRE
+# 3. ESPACE PRINCIPAL : RECHERCHE ET FORMULAIRES
 # ---------------------------------------------------------
 symptome_search = st.text_input("Search", placeholder=T["search_ph"], label_visibility="collapsed")
 
@@ -324,8 +361,56 @@ if "afficher_formulaire" not in st.session_state:
 
 if st.button(T["btn_add_med"]):
     st.session_state.afficher_formulaire = not st.session_state.afficher_formulaire
+    st.session_state.med_a_modifier = None
 
-if st.session_state.afficher_formulaire:
+# FORMULAIRE MODIFICATION DE MÉDICAMENT
+if st.session_state.med_a_modifier:
+    med_edit = st.session_state.med_a_modifier
+    with st.expander(T["edit_title"], expanded=True):
+        with st.form("form_edit_med"):
+            col1, col2 = st.columns(2)
+            with col1:
+                edit_nom = st.text_input(T["nom_med"], value=med_edit.get("Nom", ""))
+                cat_choices = [c for c in st.session_state.categories if c != "Toutes les catégories"]
+                cat_index = cat_choices.index(med_edit.get("Categorie")) if med_edit.get("Categorie") in cat_choices else 0
+                edit_cat = st.selectbox(T["cat_label"], cat_choices if cat_choices else ["Autre"], index=cat_index)
+                edit_sympt = st.text_area(T["sympt_label"], value=med_edit.get("Symptomes", ""))
+            
+            with col2:
+                edit_qty = st.number_input(T["qty_label"], min_value=1, step=1, value=int(med_edit.get("Quantite", 1)))
+                
+                try:
+                    date_val = datetime.strptime(str(med_edit.get("Peremption")), '%Y-%m-%d').date()
+                except Exception:
+                    date_val = datetime.today().date()
+                edit_peremp = st.date_input(T["peremp_label"], value=date_val)
+
+            col_u_save, col_u_cancel = st.columns(2)
+            with col_u_save:
+                btn_update = st.form_submit_button(T["btn_update"])
+            with col_u_cancel:
+                btn_cancel_edit = st.form_submit_button(T["btn_cancel"])
+
+            if btn_update:
+                updated_dict = {
+                    "ID": med_edit.get("ID"),
+                    "Nom": edit_nom.strip(),
+                    "Categorie": edit_cat,
+                    "Symptomes": edit_sympt.strip(),
+                    "Quantite": int(edit_qty),
+                    "Peremption": str(edit_peremp)
+                }
+                modifier_med_cloud(med_edit.get("firebase_key"), updated_dict)
+                st.session_state.meds_liste = charger_meds_cloud()
+                st.session_state.med_a_modifier = None
+                st.rerun()
+
+            if btn_cancel_edit:
+                st.session_state.med_a_modifier = None
+                st.rerun()
+
+# FORMULAIRE AJOUT DE MÉDICAMENTS
+elif st.session_state.afficher_formulaire:
     with st.expander(T["form_title"], expanded=True):
         with st.form("form_ajout_med", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -361,12 +446,10 @@ if st.session_state.afficher_formulaire:
                         "Peremption": str(peremption_med)
                     }
                     
-                    # 1. Sauvegarde dans Firebase
                     fb_key = sauvegarder_med_cloud(nouveau_med_dict)
                     if fb_key:
                         nouveau_med_dict['firebase_key'] = fb_key
                     
-                    # 2. Mise à jour immédiate de la mémoire session_state
                     st.session_state.meds_liste.append(nouveau_med_dict)
                     st.session_state.afficher_formulaire = False
                     st.rerun()
@@ -416,7 +499,7 @@ with col_stat2:
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 5. LISTE PRINCIPALE DES MÉDICAMENTS
+# 5. LISTE PRINCIPALE DES MÉDICAMENTS (AVEC TRADUCTION & RECHERCHE)
 # ---------------------------------------------------------
 cat_current_display = TRAD_CATS.get(st.session_state.cat_selectionnee, st.session_state.cat_selectionnee) if lang == "العربية" else st.session_state.cat_selectionnee
 st.subheader(f"{T['stock_title']} {cat_current_display}")
@@ -426,15 +509,16 @@ df_affiche = df_meds.copy()
 if st.session_state.cat_selectionnee != "Toutes les catégories" and not df_affiche.empty:
     df_affiche = df_affiche[df_affiche["Categorie"] == st.session_state.cat_selectionnee]
 
+# Moteur de recherche bilingue
 if symptome_search.strip() != "" and not df_affiche.empty:
     query = symptome_search.strip().lower()
-    query_fr = TRAD_MOTS.get(query, query)
+    query_traduit = TRAD_MOTS.get(query, query)
     
     df_affiche = df_affiche[
         df_affiche["Nom"].astype(str).str.lower().str.contains(query, na=False) |
-        df_affiche["Nom"].astype(str).str.lower().str.contains(query_fr, na=False) |
+        df_affiche["Nom"].astype(str).str.lower().str.contains(query_traduit, na=False) |
         df_affiche["Symptomes"].astype(str).str.lower().str.contains(query, na=False) |
-        df_affiche["Symptomes"].astype(str).str.lower().str.contains(query_fr, na=False)
+        df_affiche["Symptomes"].astype(str).str.lower().str.contains(query_traduit, na=False)
     ]
 
 if df_affiche.empty:
@@ -443,17 +527,28 @@ else:
     for idx, row in df_affiche.iterrows():
         cat_card = TRAD_CATS.get(row['Categorie'], row['Categorie']) if lang == "العربية" else row['Categorie']
         
+        # Traduction dynamique des symptômes affichés selon la langue choisie
+        symptomes_affiches = traduire_texte_symptomes(row['Symptomes'], lang)
+        
         st.markdown(f"""
             <div class="med-card">
                 <h3 style="margin:0; color:#60A5FA;">💊 {row['Nom']}</h3>
-                <p style="margin:5px 0;">🎯 <b>{T['sympt_card']} :</b> {row['Symptomes']}</p>
+                <p style="margin:5px 0;">🎯 <b>{T['sympt_card']} :</b> {symptomes_affiches}</p>
                 <p style="margin:5px 0;">🏷️ <b>{T['cat_card']} :</b> {cat_card}</p>
                 <p style="margin:5px 0;">📦 <b>{T['qty_card']} :</b> {row['Quantite']} | 📅 <b>{T['peremp_card']} :</b> {row['Peremption']}</p>
             </div>
         """, unsafe_allow_html=True)
         
-        if st.button(f"{T['del_med']} {row['Nom']}", key=f"del_med_btn_{row.get('firebase_key', idx)}"):
-            supprimer_med_cloud(row.get('firebase_key'))
-            # Retrait immédiat de la mémoire
-            st.session_state.meds_liste = [m for m in st.session_state.meds_liste if m.get('firebase_key') != row.get('firebase_key')]
-            st.rerun()
+        # Boutons d'action : Modifier et Supprimer
+        col_btn_edit, col_btn_del = st.columns(2)
+        with col_btn_edit:
+            if st.button(f"{T['edit_med']} {row['Nom']}", key=f"edit_btn_{row.get('firebase_key', idx)}"):
+                st.session_state.med_a_modifier = row.to_dict()
+                st.session_state.afficher_formulaire = False
+                st.rerun()
+                
+        with col_btn_del:
+            if st.button(f"{T['del_med']} {row['Nom']}", key=f"del_med_btn_{row.get('firebase_key', idx)}"):
+                supprimer_med_cloud(row.get('firebase_key'))
+                st.session_state.meds_liste = [m for m in st.session_state.meds_liste if m.get('firebase_key') != row.get('firebase_key')]
+                st.rerun()
