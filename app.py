@@ -75,50 +75,40 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CSS : MASQUAGE TOTAL DU BADGE DU BAS ET DES LOGOS STREAMLIT
+# CSS : RENDERIN SUR SUR MOBILE (FLÈCHE VISIBLE + NO LOGOS)
 # ---------------------------------------------------------
 st.markdown("""
     <style>
-    /* 1. MASQUER LE FOOTER ET LE BADGE STREAMLIT EN BAS */
+    /* 1. Masquer les éléments inutiles (Footer, Bouton Deploy, Menu contextuel, Liens Streamlit/GitHub) */
     footer { display: none !important; visibility: hidden !important; }
-    .viewerBadge_container__1S-S7, 
-    .viewerBadge_link__1S-S7, 
-    [data-testid="stStatusWidget"],
-    [data-testid="stAppDeployButton"],
-    div[class*="viewerBadge"],
-    div[class*="styles_viewerBadge"],
-    a[href*="streamlit.io"] {
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-    }
-
-    /* 2. MASQUER LE MENU HAMBURGER HAUT DROITE ET BARRE GITHUB */
     #MainMenu { display: none !important; }
+    .stAppDeployButton { display: none !important; }
     div[data-testid="stDecoration"] { display: none !important; }
+    div[data-testid="stStatusWidget"] { display: none !important; }
     div[data-testid="stToolbar"] { display: none !important; }
-    button[title="View source"] { display: none !important; }
-    a[href*="github.com"] { display: none !important; }
-    
-    /* 3. CONSERVER LA FLÈCHE DU MENU EN HAUT À GAUCHE */
-    header[data-testid="stHeader"] {
-        background: transparent !important;
-        z-index: 999999 !important;
-    }
+    a[href*="streamlit.io"], a[href*="github.com"] { display: none !important; }
 
-    button[data-testid="stSidebarCollapseButton"], 
-    button[data-testid="baseButton-header"] {
+    /* 2. FORCER L'AFFICHAGE DU BOUTON DE LA FLÈCHE SUR MOBILE */
+    [data-testid="collapsedControl"], 
+    [data-testid="stSidebarCollapseButton"],
+    button[aria-label*="sidebar"],
+    button[aria-label*="Sidebar"] {
+        display: flex !important;
         visibility: visible !important;
-        display: inline-flex !important;
+        opacity: 1 !important;
+        background-color: #1E293B !important;
         color: #60A5FA !important;
-        background-color: #0F172A !important;
         border: 1px solid #334155 !important;
         border-radius: 8px !important;
-        z-index: 999999 !important;
+        position: fixed !important;
+        top: 10px !important;
+        left: 10px !important;
+        z-index: 9999999 !important;
+        width: 42px !important;
+        height: 42px !important;
     }
 
-    /* Style global sombre */
+    /* 3. Style sombre global */
     .stApp { background-color: #121824 !important; color: #E2E8F0 !important; }
     
     .header-container {
@@ -128,10 +118,11 @@ st.markdown("""
         padding: 15px;
         border-radius: 10px;
         margin-bottom: 15px;
+        margin-top: 20px;
     }
     .header-title {
         color: #60A5FA !important;
-        font-size: 2.5rem;
+        font-size: 2.2rem;
         font-weight: bold;
         margin: 0;
     }
