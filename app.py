@@ -7,7 +7,7 @@ from datetime import datetime
 # ---------------------------------------------------------
 # CONFIGURATION ET CONNEXION FIREBASE CLOUD
 # ---------------------------------------------------------
-FIREBASE_URL = "https://pharmacie-app-default-rtdb.firebaseio.com"
+FIREBASE_URL = "https://pharmacie-app-1f3ce-default-rtdb.firebaseio.com"
 
 def charger_meds_cloud():
     """Récupère tous les médicaments depuis Firebase en associant la clé unique."""
