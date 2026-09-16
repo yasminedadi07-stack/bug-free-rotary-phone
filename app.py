@@ -10,7 +10,7 @@ from datetime import datetime
 FIREBASE_URL = "https://pharmacie-app-default-rtdb.firebaseio.com"
 
 def charger_meds_cloud():
-    """Récupère les médicaments depuis Firebase."""
+    """Récupère les médicaments depuis Firebase en attachant la clé Firebase et l'ID."""
     try:
         res = requests.get(f"{FIREBASE_URL}/medicaments.json")
         if res.status_code == 200 and res.json():
@@ -38,13 +38,22 @@ def sauvegarder_med_cloud(nouveau_med):
         st.error(f"Erreur serveur : {e}")
     return None
 
-def supprimer_med_cloud(firebase_key):
-    """Supprime un médicament via sa clé Firebase."""
+def supprimer_med_cloud(firebase_key=None, med_id=None):
+    """Supprime un médicament par sa clé Firebase ou par son ID s'il n'a pas de clé."""
     try:
         if firebase_key:
             requests.delete(f"{FIREBASE_URL}/medicaments/{firebase_key}.json")
-    except Exception:
-        pass
+        elif med_id is not None:
+            # Récupération complète pour trouver le nœud correspondant à cet ID
+            res = requests.get(f"{FIREBASE_URL}/medicaments.json")
+            if res.status_code == 200 and res.json():
+                data = res.json()
+                if isinstance(data, dict):
+                    for k, v in data.items():
+                        if isinstance(v, dict) and str(v.get("ID")) == str(med_id):
+                            requests.delete(f"{FIREBASE_URL}/medicaments/{k}.json")
+    except Exception as e:
+        st.error(f"Erreur de suppression : {e}")
 
 def charger_categories_cloud():
     """Récupère les catégories depuis Firebase."""
@@ -78,7 +87,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# Dictionnaires de traduction avancée (Symptômes & Catégories)
+# Dictionnaires de traduction avancée
 # ---------------------------------------------------------
 TRAD_CATS = {
     "Toutes les catégories": "جميع الفئات",
@@ -383,6 +392,7 @@ if st.session_state.afficher_formulaire:
                     if fb_key:
                         nouveau_med_dict['firebase_key'] = fb_key
                     
+                    # Mise à jour immédiate
                     st.session_state.meds_liste.append(nouveau_med_dict)
                     st.session_state.afficher_formulaire = False
                     st.rerun()
@@ -432,7 +442,7 @@ with col_stat2:
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 5. LISTE PRINCIPALE DES MÉDICAMENTS (AVEC TRADUCTION & RECHERCHE)
+# 5. LISTE PRINCIPALE DES MÉDICAMENTS
 # ---------------------------------------------------------
 cat_current_display = TRAD_CATS.get(st.session_state.cat_selectionnee, st.session_state.cat_selectionnee) if lang == "العربية" else st.session_state.cat_selectionnee
 st.subheader(f"{T['stock_title']} {cat_current_display}")
@@ -459,8 +469,6 @@ if df_affiche.empty:
 else:
     for idx, row in df_affiche.iterrows():
         cat_card = TRAD_CATS.get(row['Categorie'], row['Categorie']) if lang == "العربية" else row['Categorie']
-        
-        # Traduction dynamique des symptômes affichés selon la langue choisie
         symptomes_affiches = traduire_texte_symptomes(row['Symptomes'], lang)
         
         st.markdown(f"""
@@ -472,8 +480,12 @@ else:
             </div>
         """, unsafe_allow_html=True)
         
-        # Bouton de suppression unique
-        if st.button(f"{T['del_med']} {row['Nom']}", key=f"del_med_btn_{row.get('firebase_key', idx)}"):
-            supprimer_med_cloud(row.get('firebase_key'))
-            st.session_state.meds_liste = [m for m in st.session_state.meds_liste if m.get('firebase_key') != row.get('firebase_key')]
+        # Suppression hybride (par firebase_key OU par ID)
+        fb_k = row.get('firebase_key') if pd.notna(row.get('firebase_key')) else None
+        m_id = row.get('ID') if pd.notna(row.get('ID')) else None
+        
+        if st.button(f"{T['del_med']} {row['Nom']}", key=f"del_med_btn_{fb_k if fb_k else m_id}_{idx}"):
+            supprimer_med_cloud(firebase_key=fb_k, med_id=m_id)
+            # Rechargement complet depuis Firebase pour mettre à jour immédiatement
+            st.session_state.meds_liste = charger_meds_cloud()
             st.rerun()
