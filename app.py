@@ -10,14 +10,20 @@ from datetime import datetime
 FIREBASE_URL = "https://pharmacie-app-default-rtdb.firebaseio.com"
 
 def charger_meds_cloud():
-    """Récupère les médicaments depuis le cloud Firebase."""
+    """Récupère les médicaments depuis le cloud Firebase sous forme de liste propre."""
     try:
         res = requests.get(f"{FIREBASE_URL}/medicaments.json")
         if res.status_code == 200 and res.json():
             data = res.json()
+            liste_resultat = []
             if isinstance(data, dict):
-                return list(data.values())
-            return data
+                for key, val in data.items():
+                    if isinstance(val, dict):
+                        val['firebase_key'] = key  # Conserver la clé Firebase pour la suppression
+                        liste_resultat.append(val)
+                return liste_resultat
+            elif isinstance(data, list):
+                return [v for v in data if v is not None]
     except Exception:
         pass
     return []
@@ -29,23 +35,36 @@ def sauvegarder_med_cloud(nouveau_med):
     except Exception as e:
         st.error(f"Erreur de connexion au serveur : {e}")
 
+def supprimer_med_cloud(firebase_key):
+    """Supprime un médicament via sa clé Firebase."""
+    try:
+        if firebase_key:
+            requests.delete(f"{FIREBASE_URL}/medicaments/{firebase_key}.json")
+    except Exception:
+        pass
+
 def charger_categories_cloud():
     """Récupère les catégories depuis Firebase."""
     cats_par_defaut = ["Toutes les catégories", "Douleur & Fièvre", "Yeux & Oreilles"]
     try:
         res = requests.get(f"{FIREBASE_URL}/categories.json")
         if res.status_code == 200 and res.json():
-            return list(res.json().values())
+            data = res.json()
+            if isinstance(data, dict):
+                return list(data.values())
+            elif isinstance(data, list):
+                return [c for c in data if c is not None]
     except Exception:
         pass
     return cats_par_defaut
 
 def sauvegarder_categories_cloud(categories):
-    """Met à jour les catégories sur Firebase."""
+    """Met à jour les catégories sur Firebase sous forme de dictionnaire propre."""
     try:
-        requests.put(f"{FIREBASE_URL}/categories.json", data=json.dumps(categories))
-    except Exception:
-        pass
+        cats_dict = {str(i): cat for i, cat in enumerate(categories)}
+        requests.put(f"{FIREBASE_URL}/categories.json", data=json.dumps(cats_dict))
+    except Exception as e:
+        st.error(f"Erreur d'enregistrement : {e}")
 
 # Configuration de la page (Forcer la barre latérale ouverte sur mobile)
 st.set_page_config(
@@ -55,17 +74,23 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS : Masquer les logos Streamlit TOUT EN GARDANT le bouton du menu (flèche) accessible
+# ---------------------------------------------------------
+# CSS : MASQUAGE COMPLET DES LOGOS STREAMLIT / GITHUB & DESIGN
+# ---------------------------------------------------------
 st.markdown("""
     <style>
-    /* Masquer le menu hamburger à droite, le bouton Deploy, le footer et la décoration rouge */
-    #MainMenu { visibility: hidden !important; }
-    footer { visibility: hidden !important; }
+    /* Masquer tous les logos, menus, liens GitHub et footers de Streamlit */
+    #MainMenu { visibility: hidden !important; display: none !important; }
+    footer { visibility: hidden !important; display: none !important; }
     .stAppDeployButton { display: none !important; }
     div[data-testid="stDecoration"] { display: none !important; }
     div[data-testid="stStatusWidget"] { display: none !important; }
+    div[data-testid="stToolbar"] { display: none !important; }
+    button[title="View source"] { display: none !important; }
+    .viewerBadge_container__1S-S7 { display: none !important; }
+    a[href*="github.com"] { display: none !important; }
     
-    /* Garder le header transparent pour conserver le bouton de la flèche du menu */
+    /* Conserver l'en-tête transparent pour laisser la flèche du menu accessible */
     header[data-testid="stHeader"] {
         background-color: transparent !important;
         z-index: 99999 !important;
@@ -198,7 +223,8 @@ if lang == "العربية":
         "expired_title": "🚨 أدوية منتهية الصلاحية",
         "low_qty_title": "📉 أدوية على وشك النفاد",
         "no_expired": "✅ لا توجد أدوية منتهية الصلاحية.",
-        "no_low": "✅ جميع الكميات متوفرة."
+        "no_low": "✅ جميع الكميات متوفرة.",
+        "del_med": "🗑️ حذف الدواء"
     }
 else:
     titre_app = "💊 PHARMACIE"
@@ -230,20 +256,29 @@ else:
         "expired_title": "🚨 Médicaments Expirés",
         "low_qty_title": "📉 Stock Faible",
         "no_expired": "✅ Aucun médicament expiré.",
-        "no_low": "✅ Tous les stocks sont suffisants."
+        "no_low": "✅ Tous les stocks sont suffisants.",
+        "del_med": "🗑️ Supprimer"
     }
 
 with col_title:
     st.markdown(f'<div class="header-container"><h1 class="header-title">{titre_app}</h1></div>', unsafe_allow_html=True)
 
-# Synchronisation avec le Cloud
+# Synchronisation sécurisée avec le Cloud
 categories_base = charger_categories_cloud()
+if "Toutes les catégories" not in categories_base:
+    categories_base.insert(0, "Toutes les catégories")
+
 meds_liste = charger_meds_cloud()
 
+# Initialisation sûre du DataFrame
+cols_attendues = ["ID", "Nom", "Categorie", "Symptomes", "Quantite", "Peremption", "firebase_key"]
 if meds_liste:
     df_meds = pd.DataFrame(meds_liste)
+    for col in cols_attendues:
+        if col not in df_meds.columns:
+            df_meds[col] = "" if col != "ID" and col != "Quantite" else 0
 else:
-    df_meds = pd.DataFrame(columns=["ID", "Nom", "Categorie", "Symptomes", "Quantite", "Peremption"])
+    df_meds = pd.DataFrame(columns=cols_attendues)
 
 # ---------------------------------------------------------
 # 2. MENU À GAUCHE (SIDEBAR)
@@ -266,22 +301,24 @@ with st.sidebar.expander(T["add_cat"]):
     nouvelle_cat = st.text_input("Name", placeholder=T["add_cat_ph"], label_visibility="collapsed", key="input_new_cat")
     if st.button(T["add_cat_btn"], key="btn_add_cat"):
         if nouvelle_cat.strip() != "" and nouvelle_cat not in categories_base:
-            categories_base.append(nouvelle_cat)
+            categories_base.append(nouvelle_cat.strip())
             sauvegarder_categories_cloud(categories_base)
             st.rerun()
 
 with st.sidebar.expander(T["del_cat"]):
     cats_supprimables = [c for c in categories_base if c != "Toutes les catégories"]
-    cats_supprimables_display = [TRAD_CATS.get(c, c) if lang == "العربية" else c for c in cats_supprimables]
     
-    if cats_supprimables_display:
-        cat_to_del_display = st.selectbox("Select", cats_supprimables_display, label_visibility="collapsed", key="select_del_cat")
+    if cats_supprimables:
+        # Map d'affichage sécurisée
+        cat_map = {TRAD_CATS.get(c, c) if lang == "العربية" else c: c for c in cats_supprimables}
+        cat_to_del_display = st.selectbox("Select", list(cat_map.keys()), label_visibility="collapsed", key="select_del_cat")
+        
         if st.button(T["del_cat_btn"], key="btn_del_cat"):
-            cat_to_del_fr = TRAD_CATS.get(cat_to_del_display, cat_to_del_display)
-            if cat_to_del_fr in categories_base:
-                categories_base.remove(cat_to_del_fr)
+            cat_to_del_real = cat_map[cat_to_del_display]
+            if cat_to_del_real in categories_base:
+                categories_base.remove(cat_to_del_real)
                 sauvegarder_categories_cloud(categories_base)
-                if st.session_state.cat_selectionnee == cat_to_del_fr:
+                if st.session_state.cat_selectionnee == cat_to_del_real:
                     st.session_state.cat_selectionnee = "Toutes les catégories"
                 st.rerun()
 
@@ -304,8 +341,9 @@ if st.session_state.afficher_formulaire:
             with col1:
                 nom_med = st.text_input(T["nom_med"])
                 cat_choices_fr = [c for c in categories_base if c != "Toutes les catégories"]
-                cat_choices_display = [TRAD_CATS.get(c, c) if lang == "العربية" else c for c in cat_choices_fr]
-                cat_med_display = st.selectbox(T["cat_label"], cat_choices_display)
+                cat_map_form = {TRAD_CATS.get(c, c) if lang == "العربية" else c: c for c in cat_choices_fr}
+                
+                cat_med_display = st.selectbox(T["cat_label"], list(cat_map_form.keys()) if cat_map_form else ["Autre"])
                 symptomes_med = st.text_area(T["sympt_label"], placeholder=T["sympt_ph"])
             
             with col2:
@@ -322,8 +360,8 @@ if st.session_state.afficher_formulaire:
                 if nom_med.strip() == "":
                     st.error("Nom obligatoire.")
                 else:
-                    cat_final_fr = TRAD_CATS.get(cat_med_display, cat_med_display)
-                    nouveau_id = 1 if df_meds.empty else int(df_meds["ID"].max()) + 1
+                    cat_final_fr = cat_map_form.get(cat_med_display, cat_med_display)
+                    nouveau_id = 1 if df_meds.empty or "ID" not in df_meds.columns else int(pd.to_numeric(df_meds["ID"], errors='coerce').fillna(0).max()) + 1
                     
                     nouveau_med_dict = {
                         "ID": nouveau_id,
@@ -350,7 +388,7 @@ st.markdown("---")
 today_str = datetime.today().strftime('%Y-%m-%d')
 
 df_expired = df_meds[df_meds["Peremption"].astype(str) <= today_str] if not df_meds.empty else pd.DataFrame()
-df_low = df_meds[df_meds["Quantite"].astype(int) <= 2] if not df_meds.empty else pd.DataFrame()
+df_low = df_meds[pd.to_numeric(df_meds["Quantite"], errors='coerce').fillna(0) <= 2] if not df_meds.empty else pd.DataFrame()
 
 col_stat1, col_stat2 = st.columns(2)
 
@@ -383,7 +421,7 @@ with col_stat2:
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 5. LISTE PRINCIPALE DES MÉDICAMENTS
+# 5. LISTE PRINCIPALE DES MÉDICAMENTS (AVEC SUPPRESSION INCLUSE)
 # ---------------------------------------------------------
 cat_current_display = TRAD_CATS.get(st.session_state.cat_selectionnee, st.session_state.cat_selectionnee) if lang == "العربية" else st.session_state.cat_selectionnee
 st.subheader(f"{T['stock_title']} {cat_current_display}")
@@ -398,10 +436,10 @@ if symptome_search.strip() != "" and not df_affiche.empty:
     query_fr = TRAD_MOTS.get(query, query)
     
     df_affiche = df_affiche[
-        df_affiche["Nom"].astype(str).str.lower().str.contains(query) |
-        df_affiche["Nom"].astype(str).str.lower().str.contains(query_fr) |
-        df_affiche["Symptomes"].astype(str).str.lower().str.contains(query) |
-        df_affiche["Symptomes"].astype(str).str.lower().str.contains(query_fr)
+        df_affiche["Nom"].astype(str).str.lower().str.contains(query, na=False) |
+        df_affiche["Nom"].astype(str).str.lower().str.contains(query_fr, na=False) |
+        df_affiche["Symptomes"].astype(str).str.lower().str.contains(query, na=False) |
+        df_affiche["Symptomes"].astype(str).str.lower().str.contains(query_fr, na=False)
     ]
 
 if df_affiche.empty:
@@ -410,11 +448,18 @@ else:
     for idx, row in df_affiche.iterrows():
         cat_card = TRAD_CATS.get(row['Categorie'], row['Categorie']) if lang == "العربية" else row['Categorie']
         
-        st.markdown(f"""
-            <div class="med-card">
-                <h3 style="margin:0; color:#60A5FA;">💊 {row['Nom']}</h3>
-                <p style="margin:5px 0;">🎯 <b>{T['sympt_card']} :</b> {row['Symptomes']}</p>
-                <p style="margin:5px 0;">🏷️ <b>{T['cat_card']} :</b> {cat_card}</p>
-                <p style="margin:5px 0;">📦 <b>{T['qty_card']} :</b> {row['Quantite']} | 📅 <b>{T['peremp_card']} :</b> {row['Peremption']}</p>
-            </div>
-        """, unsafe_allow_html=True)
+        col_card, col_btn = st.columns([5, 1])
+        with col_card:
+            st.markdown(f"""
+                <div class="med-card">
+                    <h3 style="margin:0; color:#60A5FA;">💊 {row['Nom']}</h3>
+                    <p style="margin:5px 0;">🎯 <b>{T['sympt_card']} :</b> {row['Symptomes']}</p>
+                    <p style="margin:5px 0;">🏷️ <b>{T['cat_card']} :</b> {cat_card}</p>
+                    <p style="margin:5px 0;">📦 <b>{T['qty_card']} :</b> {row['Quantite']} | 📅 <b>{T['peremp_card']} :</b> {row['Peremption']}</p>
+                </div>
+            """, unsafe_allow_html=True)
+        with col_btn:
+            # Bouton de suppression individuelle de médicament
+            if st.button("🗑️", key=f"del_med_btn_{row.get('firebase_key', idx)}"):
+                supprimer_med_cloud(row.get('firebase_key'))
+                st.rerun()
