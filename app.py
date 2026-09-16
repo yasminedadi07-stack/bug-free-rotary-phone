@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import requests
 import json
-import time
 from datetime import datetime
 
 # ---------------------------------------------------------
@@ -11,7 +10,7 @@ from datetime import datetime
 FIREBASE_URL = "https://pharmacie-app-default-rtdb.firebaseio.com"
 
 def charger_meds_cloud():
-    """Récupère en temps réel les médicaments depuis Firebase Cloud."""
+    """Récupère les médicaments depuis Firebase avec leurs clés uniques."""
     try:
         res = requests.get(f"{FIREBASE_URL}/medicaments.json")
         if res.status_code == 200 and res.json():
@@ -30,17 +29,17 @@ def charger_meds_cloud():
     return []
 
 def sauvegarder_med_cloud(nouveau_med):
-    """Envoie et valide le médicament sur le serveur Firebase."""
+    """Enregistre le médicament et retourne la clé générée par Firebase."""
     try:
         res = requests.post(f"{FIREBASE_URL}/medicaments.json", data=json.dumps(nouveau_med))
-        if res.status_code == 200:
-            return True
+        if res.status_code == 200 and res.json():
+            return res.json().get('name')
     except Exception as e:
         st.error(f"Erreur de connexion : {e}")
-    return False
+    return None
 
 def supprimer_med_cloud(firebase_key=None, med_id=None):
-    """Supprime définitivement le médicament sur Firebase Cloud."""
+    """Supprime un médicament directement par sa clé Firebase ou par son ID."""
     try:
         if firebase_key:
             requests.delete(f"{FIREBASE_URL}/medicaments/{firebase_key}.json")
@@ -56,27 +55,28 @@ def supprimer_med_cloud(firebase_key=None, med_id=None):
         st.error(f"Erreur de suppression : {e}")
 
 def charger_categories_cloud():
-    """Récupère les catégories depuis Firebase Cloud."""
-    cats_par_defaut = ["Toutes les catégories", "Douleur & Fièvre", "Yeux & Oreilles"]
+    """Récupère la liste propre des catégories."""
+    cats_defaut = ["Toutes les catégories", "Douleur & Fièvre", "Yeux & Oreilles"]
     try:
         res = requests.get(f"{FIREBASE_URL}/categories.json")
         if res.status_code == 200 and res.json():
             data = res.json()
             if isinstance(data, list):
-                return [c for c in data if c]
+                clean_list = [c for c in data if c]
+                return clean_list if clean_list else cats_defaut
             elif isinstance(data, dict):
                 return list(data.values())
     except Exception:
         pass
-    return cats_par_defaut
+    return cats_defaut
 
 def sauvegarder_categories_cloud(categories):
-    """Sauvegarde les catégories sur Firebase Cloud."""
+    """Met à jour l'ensemble des catégories sur Firebase."""
     try:
         cats_propres = [c for c in categories if c]
         requests.put(f"{FIREBASE_URL}/categories.json", data=json.dumps(cats_propres))
-    except Exception:
-        pass
+    except Exception as e:
+        st.error(f"Erreur catégories : {e}")
 
 # Configuration de la page
 st.set_page_config(
@@ -87,7 +87,22 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# Dictionnaires de traduction
+# INITIALISATION ET SYNCHRONISATION DES ÉTATS
+# ---------------------------------------------------------
+if "categories" not in st.session_state:
+    st.session_state.categories = charger_categories_cloud()
+
+if "Toutes les catégories" not in st.session_state.categories:
+    st.session_state.categories.insert(0, "Toutes les catégories")
+
+if "cat_selectionnee" not in st.session_state:
+    st.session_state.cat_selectionnee = "Toutes les catégories"
+
+if "meds_liste" not in st.session_state:
+    st.session_state.meds_liste = charger_meds_cloud()
+
+# ---------------------------------------------------------
+# TRADUCTION
 # ---------------------------------------------------------
 TRAD_CATS = {
     "Toutes les catégories": "جميع الفئات",
@@ -99,46 +114,20 @@ TRAD_CATS = {
 }
 
 TRAD_MOTS = {
-    "fievre": "حمى", "fièvre": "حمى",
-    "douleur": "ألم", "tete": "صداع", "tête": "صداع",
-    "toux": "سعال", "yeux": "عيون", "oeil": "عين",
-    "oreille": "أذن", "oreilles": "أذن",
-    "doliprane": "دوليبران", "paracetamol": "باراسيتامول",
-    "حمى": "fievre", "الحمى": "fievre",
-    "ألم": "douleur", "الألم": "douleur", "وجع": "douleur",
-    "صداع": "tete", "الصداع": "tete", "رأس": "tete",
-    "سعال": "toux", "السعال": "toux",
-    "عين": "yeux", "العيون": "yeux",
-    "أذن": "oreille", "الأذن": "oreille"
+    "fievre": "حمى", "fièvre": "حمى", "douleur": "ألم", "tete": "صداع",
+    "tête": "صداع", "toux": "سعال", "yeux": "عيون", "oeil": "عين",
+    "oreille": "أذن", "oreilles": "أذن", "doliprane": "دوليبران",
+    "paracetamol": "باراسيتامول", "حمى": "fievre", "الحمى": "fievre",
+    "ألم": "douleur", "الألم": "douleur", "صداع": "tete",
+    "سعال": "toux", "عين": "yeux", "أذن": "oreille"
 }
 
 def traduire_texte_symptomes(texte_symptomes, lang_target):
     if not texte_symptomes or not isinstance(texte_symptomes, str):
         return ""
     mots = texte_symptomes.replace(',', ' ').split()
-    mots_traduits = []
-    for m in mots:
-        m_clean = m.lower().strip()
-        trad = TRAD_MOTS.get(m_clean, m)
-        mots_traduits.append(trad)
+    mots_traduits = [TRAD_MOTS.get(m.lower().strip(), m) for m in mots]
     return " ".join(mots_traduits)
-
-# Synchronisation systématique depuis le Cloud à chaque affichage
-categories_base = charger_categories_cloud()
-if "Toutes les catégories" not in categories_base:
-    categories_base.insert(0, "Toutes les catégories")
-
-if "categories" not in st.session_state:
-    st.session_state.categories = categories_base
-else:
-    st.session_state.categories = categories_base
-
-if "cat_selectionnee" not in st.session_state:
-    st.session_state.cat_selectionnee = "Toutes les catégories"
-
-# Forcer la lecture Firebase directe
-meds_liste = charger_meds_cloud()
-st.session_state.meds_liste = meds_liste
 
 # ---------------------------------------------------------
 # CSS
@@ -147,7 +136,6 @@ st.markdown("""
     <style>
     footer { display: none !important; }
     .stAppDeployButton { display: none !important; }
-
     .stApp { background-color: #121824 !important; color: #E2E8F0 !important; }
     
     .header-container {
@@ -158,17 +146,8 @@ st.markdown("""
         border-radius: 10px;
         margin-bottom: 15px;
     }
-    .header-title {
-        color: #60A5FA !important;
-        font-size: 2.2rem;
-        font-weight: bold;
-        margin: 0;
-    }
-
-    section[data-testid="stSidebar"] {
-        background-color: #0F172A !important;
-        border-right: 1px solid #1E293B;
-    }
+    .header-title { color: #60A5FA !important; font-size: 2.2rem; font-weight: bold; margin: 0; }
+    section[data-testid="stSidebar"] { background-color: #0F172A !important; border-right: 1px solid #1E293B; }
 
     .med-card {
         background-color: #1E293B !important;
@@ -178,7 +157,6 @@ st.markdown("""
         border-radius: 10px;
         margin-bottom: 8px;
     }
-    
     .alert-card-expired {
         background-color: #2D1517 !important;
         border: 1px solid #7F1D1D;
@@ -195,98 +173,55 @@ st.markdown("""
         border-radius: 8px;
         margin-bottom: 10px;
     }
-
     .stTextInput>div>div>input, .stSelectbox>div>div>div {
-        background-color: #1E293B !important;
-        color: #FFFFFF !important;
-        border: 1px solid #334155 !important;
-        border-radius: 6px;
+        background-color: #1E293B !important; color: #FFFFFF !important;
+        border: 1px solid #334155 !important; border-radius: 6px;
     }
     .stButton>button {
-        background-color: #2563EB !important;
-        color: #FFFFFF !important;
-        border: none !important;
-        border-radius: 6px;
-        font-weight: 600;
-        width: 100%;
+        background-color: #2563EB !important; color: #FFFFFF !important;
+        border: none !important; border-radius: 6px; font-weight: 600; width: 100%;
     }
     .stButton>button:hover { background-color: #1D4ED8 !important; }
     </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 1. BARRE EN HAUT (TITRE CENTRÉ + TRADUCTION)
+# 1. BARRE EN HAUT (TITRE + LANGUE)
 # ---------------------------------------------------------
 col_empty, col_title, col_lang = st.columns([1, 4, 1])
 
 with col_lang:
-    lang = st.selectbox("🌐 Langue / اللغة", ["العربية", "Français"], label_visibility="collapsed")
+    lang = st.selectbox("🌐 Langue", ["العربية", "Français"], label_visibility="collapsed")
 
 if lang == "العربية":
     titre_app = "💊 صيدلية"
     T = {
-        "cat_title": "📌 الفئات",
-        "all_cats": "جميع الفئات",
-        "add_cat": "➕ إضافة فئة جديدة",
-        "del_cat": "🗑️ حذف فئة",
-        "add_cat_ph": "اسم الفئة...",
-        "add_cat_btn": "تأكيد الإضافة",
-        "del_cat_btn": "تأكيد الحذف",
-        "search_ph": "🔍 بحث عن دواء أو أعراض...", 
-        "btn_add_med": "➕ إضافة دواء جديد",
-        "form_title": "📝 نموذج إضافة دواء",
-        "nom_med": "اسم الدواء",
-        "cat_label": "الفئة",
-        "sympt_label": "الأعراض / دواعي الاستعمال",
-        "sympt_ph": "مثال: Fièvre, Douleur أو الحمى، الصداع...",
-        "qty_label": "الكمية",
-        "peremp_label": "تاريخ انتهاء الصلاحية",
-        "btn_save": "✅ حفظ",
-        "btn_cancel": "❌ إلغاء",
-        "stock_title": "📦 الفئة :",
-        "no_med": "لا يوجد أي دواء.",
-        "sympt_card": "الأعراض",
-        "cat_card": "الفئة",
-        "qty_card": "الكمية",
-        "peremp_card": "تاريخ الصلاحية",
-        "expired_title": "🚨 أدوية منتهية الصلاحية",
-        "low_qty_title": "📉 أدوية على وشك النفاد",
-        "no_expired": "✅ لا توجد أدوية منتهية الصلاحية.",
-        "no_low": "✅ جميع الكميات متوفرة.",
-        "del_med": "🗑️ حذف"
+        "cat_title": "📌 الفئات", "add_cat": "➕ إضافة فئة جديدة", "del_cat": "🗑️ حذف فئة",
+        "add_cat_ph": "اسم الفئة...", "add_cat_btn": "تأكيد الإضافة", "del_cat_btn": "تأكيد الحذف",
+        "search_ph": "🔍 بحث عن دواء أو أعراض...", "btn_add_med": "➕ إضافة دواء جديد",
+        "form_title": "📝 نموذج إضافة دواء", "nom_med": "اسم الدواء", "cat_label": "الفئة",
+        "sympt_label": "الأعراض / دواعي الاستعمال", "sympt_ph": "مثال: Fièvre, Douleur...",
+        "qty_label": "الكمية", "peremp_label": "تاريخ انتهاء الصلاحية", "btn_save": "✅ حفظ",
+        "btn_cancel": "❌ إلغاء", "stock_title": "📦 الفئة :", "no_med": "لا يوجد أي دواء.",
+        "sympt_card": "الأعراض", "cat_card": "الفئة", "qty_card": "الكمية",
+        "peremp_card": "تاريخ الصلاحية", "expired_title": "🚨 أدوية منتهية الصلاحية",
+        "low_qty_title": "📉 أدوية على وشك النفاد", "no_expired": "✅ لا توجد أدوية منتهية الصلاحية.",
+        "no_low": "✅ جميع الكميات متوفرة.", "del_med": "🗑️ حذف"
     }
 else:
     titre_app = "💊 PHARMACIE"
     T = {
-        "cat_title": "📌 Catégories",
-        "all_cats": "Toutes les catégories",
-        "add_cat": "➕ Ajouter une catégorie",
-        "del_cat": "🗑️ Supprimer une catégorie",
-        "add_cat_ph": "Nom de la catégorie...",
-        "add_cat_btn": "Valider l'ajout",
-        "del_cat_btn": "Confirmer la suppression",
-        "search_ph": "🔍 Recherche par médicament ou symptôme...",
-        "btn_add_med": "➕ Ajouter un nouveau médicament",
-        "form_title": "📝 Formulaire d'ajout de médicament",
-        "nom_med": "Nom du médicament",
-        "cat_label": "Catégorie",
-        "sympt_label": "Symptômes / Indications",
-        "sympt_ph": "Ex: Fièvre, Douleur...",
-        "qty_label": "Quantité",
-        "peremp_label": "Date de péremption",
-        "btn_save": "✅ Enregistrer",
-        "btn_cancel": "❌ Annuler",
-        "stock_title": "📦 Catégorie :",
-        "no_med": "Aucun médicament disponible.",
-        "sympt_card": "Symptômes",
-        "cat_card": "Catégorie",
-        "qty_card": "Quantité",
-        "peremp_card": "Péremption",
-        "expired_title": "🚨 Médicaments Expirés",
-        "low_qty_title": "📉 Stock Faible",
-        "no_expired": "✅ Aucun médicament expiré.",
-        "no_low": "✅ Tous les stocks sont suffisants.",
-        "del_med": "🗑️ Supprimer"
+        "cat_title": "📌 Catégories", "add_cat": "➕ Ajouter une catégorie", "del_cat": "🗑️ Supprimer une catégorie",
+        "add_cat_ph": "Nom de la catégorie...", "add_cat_btn": "Valider l'ajout", "del_cat_btn": "Confirmer la suppression",
+        "search_ph": "🔍 Recherche par médicament ou symptôme...", "btn_add_med": "➕ Ajouter un nouveau médicament",
+        "form_title": "📝 Formulaire d'ajout de médicament", "nom_med": "Nom du médicament", "cat_label": "Catégorie",
+        "sympt_label": "Symptômes / Indications", "sympt_ph": "Ex: Fièvre, Douleur...",
+        "qty_label": "Quantité", "peremp_label": "Date de péremption", "btn_save": "✅ Enregistrer",
+        "btn_cancel": "❌ Annuler", "stock_title": "📦 Catégorie :", "no_med": "Aucun médicament disponible.",
+        "sympt_card": "Symptômes", "cat_card": "Catégorie", "qty_card": "Quantité",
+        "peremp_card": "Péremption", "expired_title": "🚨 Médicaments Expirés",
+        "low_qty_title": "📉 Stock Faible", "no_expired": "✅ Aucun médicament expiré.",
+        "no_low": "✅ Tous les stocks sont suffisants.", "del_med": "🗑️ Supprimer"
     }
 
 with col_title:
@@ -294,8 +229,8 @@ with col_title:
 
 # Conversion DataFrame
 cols_attendues = ["ID", "Nom", "Categorie", "Symptomes", "Quantite", "Peremption", "firebase_key"]
-if meds_liste:
-    df_meds = pd.DataFrame(meds_liste)
+if st.session_state.meds_liste:
+    df_meds = pd.DataFrame(st.session_state.meds_liste)
     for col in cols_attendues:
         if col not in df_meds.columns:
             df_meds[col] = "" if col != "ID" and col != "Quantite" else 0
@@ -312,6 +247,7 @@ for c_fr in st.session_state.categories:
     prefix = "🔹 " if st.session_state.cat_selectionnee == c_fr else ""
     if st.sidebar.button(f"{prefix}{c_display}", key=f"btn_cat_{c_fr}"):
         st.session_state.cat_selectionnee = c_fr
+        st.session_state.meds_liste = charger_meds_cloud()
         st.rerun()
 
 st.sidebar.markdown("---")
@@ -324,13 +260,11 @@ with st.sidebar.expander(T["add_cat"]):
         if val != "" and val not in st.session_state.categories:
             st.session_state.categories.append(val)
             sauvegarder_categories_cloud(st.session_state.categories)
-            time.sleep(0.3)
             st.rerun()
 
 # Supprimer une catégorie
 with st.sidebar.expander(T["del_cat"]):
     cats_supprimables = [c for c in st.session_state.categories if c != "Toutes les catégories"]
-    
     if cats_supprimables:
         cat_to_del = st.selectbox("Select", cats_supprimables, label_visibility="collapsed", key="select_del_cat")
         if st.button(T["del_cat_btn"], key="btn_del_cat"):
@@ -339,7 +273,6 @@ with st.sidebar.expander(T["del_cat"]):
                 sauvegarder_categories_cloud(st.session_state.categories)
                 if st.session_state.cat_selectionnee == cat_to_del:
                     st.session_state.cat_selectionnee = "Toutes les catégories"
-                time.sleep(0.3)
                 st.rerun()
 
 # ---------------------------------------------------------
@@ -357,7 +290,6 @@ if st.session_state.afficher_formulaire:
     with st.expander(T["form_title"], expanded=True):
         with st.form("form_ajout_med", clear_on_submit=True):
             col1, col2 = st.columns(2)
-            
             with col1:
                 nom_med = st.text_input(T["nom_med"])
                 cat_choices = [c for c in st.session_state.categories if c != "Toutes les catégories"]
@@ -389,11 +321,13 @@ if st.session_state.afficher_formulaire:
                         "Peremption": str(peremption_med)
                     }
                     
-                    success = sauvegarder_med_cloud(nouveau_med_dict)
-                    if success:
-                        st.session_state.afficher_formulaire = False
-                        time.sleep(0.4)  # Attendre que Firebase enregistre les données en ligne
-                        st.rerun()
+                    fb_key = sauvegarder_med_cloud(nouveau_med_dict)
+                    if fb_key:
+                        nouveau_med_dict['firebase_key'] = fb_key
+                    
+                    st.session_state.meds_liste.append(nouveau_med_dict)
+                    st.session_state.afficher_formulaire = False
+                    st.rerun()
             
             if btn_annuler:
                 st.session_state.afficher_formulaire = False
@@ -402,10 +336,9 @@ if st.session_state.afficher_formulaire:
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 4. STATISTIQUES CLIQUABLES
+# 4. STATISTIQUES
 # ---------------------------------------------------------
 today_str = datetime.today().strftime('%Y-%m-%d')
-
 df_expired = df_meds[df_meds["Peremption"].astype(str) <= today_str] if not df_meds.empty else pd.DataFrame()
 df_low = df_meds[pd.to_numeric(df_meds["Quantite"], errors='coerce').fillna(0) <= 2] if not df_meds.empty else pd.DataFrame()
 
@@ -440,7 +373,7 @@ with col_stat2:
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 5. LISTE PRINCIPALE DES MÉDICAMENTS
+# 5. LISTE PRINCIPALE
 # ---------------------------------------------------------
 cat_current_display = TRAD_CATS.get(st.session_state.cat_selectionnee, st.session_state.cat_selectionnee) if lang == "العربية" else st.session_state.cat_selectionnee
 st.subheader(f"{T['stock_title']} {cat_current_display}")
@@ -482,5 +415,6 @@ else:
         
         if st.button(f"{T['del_med']} {row['Nom']}", key=f"del_med_btn_{fb_k if fb_k else m_id}_{idx}"):
             supprimer_med_cloud(firebase_key=fb_k, med_id=m_id)
-            time.sleep(0.3)
+            # Mise à jour locale immédiate
+            st.session_state.meds_liste = [m for m in st.session_state.meds_liste if m.get('firebase_key') != fb_k and m.get('ID') != m_id]
             st.rerun()
