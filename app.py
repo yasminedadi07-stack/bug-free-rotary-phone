@@ -75,40 +75,15 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CSS : RENDERIN SUR SUR MOBILE (FLÈCHE VISIBLE + NO LOGOS)
+# CSS : STYLE SOMBRE + CONSERVATION DE LA BARRE NATIVE
 # ---------------------------------------------------------
 st.markdown("""
     <style>
-    /* 1. Masquer les éléments inutiles (Footer, Bouton Deploy, Menu contextuel, Liens Streamlit/GitHub) */
-    footer { display: none !important; visibility: hidden !important; }
-    #MainMenu { display: none !important; }
+    /* Masquer uniquement le footer basique et le bouton deploy */
+    footer { display: none !important; }
     .stAppDeployButton { display: none !important; }
-    div[data-testid="stDecoration"] { display: none !important; }
-    div[data-testid="stStatusWidget"] { display: none !important; }
-    div[data-testid="stToolbar"] { display: none !important; }
-    a[href*="streamlit.io"], a[href*="github.com"] { display: none !important; }
 
-    /* 2. FORCER L'AFFICHAGE DU BOUTON DE LA FLÈCHE SUR MOBILE */
-    [data-testid="collapsedControl"], 
-    [data-testid="stSidebarCollapseButton"],
-    button[aria-label*="sidebar"],
-    button[aria-label*="Sidebar"] {
-        display: flex !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        background-color: #1E293B !important;
-        color: #60A5FA !important;
-        border: 1px solid #334155 !important;
-        border-radius: 8px !important;
-        position: fixed !important;
-        top: 10px !important;
-        left: 10px !important;
-        z-index: 9999999 !important;
-        width: 42px !important;
-        height: 42px !important;
-    }
-
-    /* 3. Style sombre global */
+    /* Style global sombre */
     .stApp { background-color: #121824 !important; color: #E2E8F0 !important; }
     
     .header-container {
@@ -118,7 +93,6 @@ st.markdown("""
         padding: 15px;
         border-radius: 10px;
         margin-bottom: 15px;
-        margin-top: 20px;
     }
     .header-title {
         color: #60A5FA !important;
