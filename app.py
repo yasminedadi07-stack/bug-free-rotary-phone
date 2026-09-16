@@ -1,139 +1,416 @@
 import streamlit as st
 import pandas as pd
 import requests
+import json
 from datetime import datetime
 
-# 1. Configuration de la page (Forcer l'ouverture de la barre latérale sur mobile)
-st.set_page_config(
-    page_title="Pharmacie",
-    page_icon="💊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# 2. Masquage des éléments de l'interface Streamlit (Logo rouge, footer, menu)
-st.markdown("""
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .stAppDeployButton {display:none;}
-    div[data-testid="stDecoration"] {display:none;}
-    </style>
-""", unsafe_allow_html=True)
-
+# ---------------------------------------------------------
+# CONFIGURATION FIREBASE CLOUD (BASE DE DONNÉES EN LIGNE)
+# ---------------------------------------------------------
 FIREBASE_URL = "https://pharmacie-app-default-rtdb.firebaseio.com"
 
-# Fonctions de gestion Firebase
 def charger_meds_cloud():
+    """Récupère les médicaments depuis le cloud Firebase."""
     try:
-        r = requests.get(f"{FIREBASE_URL}/medicaments.json")
-        if r.status_code == 200 and r.json():
-            data = r.json()
-            liste = []
-            for k, v in data.items():
-                v['id_cloud'] = k
-                liste.append(v)
-            return liste
+        res = requests.get(f"{FIREBASE_URL}/medicaments.json")
+        if res.status_code == 200 and res.json():
+            data = res.json()
+            # Transformation du dictionnaire Firebase en Liste
+            if isinstance(data, dict):
+                return list(data.values())
+            return data
     except Exception:
         pass
     return []
 
-def ajouter_med_cloud(med):
+def sauvegarder_med_cloud(nouveau_med):
+    """Ajoute un nouveau médicament directement dans Firebase."""
     try:
-        requests.post(f"{FIREBASE_URL}/medicaments.json", json=med)
+        requests.post(f"{FIREBASE_URL}/medicaments.json", data=json.dumps(nouveau_med))
+    except Exception as e:
+        st.error(f"Erreur de connexion au serveur : {e}")
+
+def charger_categories_cloud():
+    """Récupère les catégories depuis Firebase."""
+    cats_par_defaut = ["Toutes les catégories", "Douleur & Fièvre", "Yeux & Oreilles"]
+    try:
+        res = requests.get(f"{FIREBASE_URL}/categories.json")
+        if res.status_code == 200 and res.json():
+            return list(res.json().values())
+    except Exception:
+        pass
+    return cats_par_defaut
+
+def sauvegarder_categories_cloud(categories):
+    """Met à jour les catégories sur Firebase."""
+    try:
+        requests.put(f"{FIREBASE_URL}/categories.json", data=json.dumps(categories))
     except Exception:
         pass
 
-def supprimer_med_cloud(id_cloud):
-    try:
-        requests.delete(f"{FIREBASE_URL}/medicaments/{id_cloud}.json")
-    except Exception:
-        pass
+# Configuration de la page (Forcer la barre latérale ouverte sur mobile)
+st.set_page_config(
+    page_title="Pharmacie", 
+    page_icon="💊", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Initialisation des données
+# CSS : Masquer la barre native + Style sombre + Cartes + Masquer icône rouge Streamlit
+st.markdown("""
+    <style>
+    /* Masquer le logo rouge, le header et le footer Streamlit */
+    #MainMenu {visibility: hidden !important;}
+    footer {visibility: hidden !important;}
+    header {visibility: hidden !important;}
+    header[data-testid="stHeader"] { display: none !important; }
+    .stAppDeployButton {display:none !important;}
+    div[data-testid="stDecoration"] {display:none !important;}
+
+    .stApp { background-color: #121824 !important; color: #E2E8F0 !important; }
+    
+    .header-container {
+        text-align: center;
+        background-color: #0F172A;
+        border: 1px solid #1E293B;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 15px;
+    }
+    .header-title {
+        color: #60A5FA !important;
+        font-size: 2.5rem;
+        font-weight: bold;
+        margin: 0;
+    }
+
+    section[data-testid="stSidebar"] {
+        background-color: #0F172A !important;
+        border-right: 1px solid #1E293B;
+    }
+
+    .med-card {
+        background-color: #1E293B !important;
+        border: 1px solid #334155;
+        border-left: 5px solid #3B82F6 !important;
+        padding: 18px;
+        border-radius: 10px;
+        margin-bottom: 12px;
+    }
+    
+    .alert-card-expired {
+        background-color: #2D1517 !important;
+        border: 1px solid #7F1D1D;
+        border-left: 5px solid #EF4444 !important;
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+    }
+    .alert-card-low {
+        background-color: #2D2215 !important;
+        border: 1px solid #78350F;
+        border-left: 5px solid #F59E0B !important;
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+    }
+
+    .stTextInput>div>div>input, .stSelectbox>div>div>div {
+        background-color: #1E293B !important;
+        color: #FFFFFF !important;
+        border: 1px solid #334155 !important;
+        border-radius: 6px;
+    }
+    .stButton>button {
+        background-color: #2563EB !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        border-radius: 6px;
+        font-weight: 600;
+        width: 100%;
+    }
+    .stButton>button:hover { background-color: #1D4ED8 !important; }
+    </style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# DONNÉES ET DICO DE TRADUCTION
+# ---------------------------------------------------------
+TRAD_CATS = {
+    "Toutes les catégories": "جميع الفئات",
+    "Douleur & Fièvre": "الألم والحمى",
+    "Yeux & Oreilles": "العيون والأذن",
+    "جميع الفئات": "Toutes les catégories",
+    "الألم والحمى": "Douleur & Fièvre",
+    "العيون والأذن": "Yeux & Oreilles"
+}
+
+TRAD_MOTS = {
+    "حمى": "fievre", "الحمى": "fievre", "فليفر": "fievre",
+    "ألم": "douleur", "الألم": "douleur", "وجع": "douleur",
+    "صداع": "tete", "الصداع": "tete", "رأس": "tete",
+    "سعال": "toux", "السعال": "toux",
+    "عين": "yeux", "العيون": "yeux",
+    "أذن": "oreille", "الأذن": "oreille",
+    "دوليبران": "doliprane", "باراسيتامول": "paracetamol"
+}
+
+# ---------------------------------------------------------
+# 1. BARRE EN HAUT (TITRE CENTRÉ + TRADUCTION)
+# ---------------------------------------------------------
+col_empty, col_title, col_lang = st.columns([1, 4, 1])
+
+with col_lang:
+    lang = st.selectbox("🌐 Langue / اللغة", ["العربية", "Français"], label_visibility="collapsed")
+
+if lang == "العربية":
+    titre_app = "💊 صيدلية"
+    T = {
+        "cat_title": "📌 الفئات",
+        "all_cats": "جميع الفئات",
+        "add_cat": "➕ إضافة فئة جديدة",
+        "del_cat": "🗑️ حذف فئة",
+        "add_cat_ph": "اسم الفئة...",
+        "add_cat_btn": "تأكيد الإضافة",
+        "del_cat_btn": "تأكيد الحذف",
+        "search_ph": "🔍 بحث...", 
+        "btn_add_med": "➕ إضافة دواء جديد",
+        "form_title": "📝 نموذج إضافة دواء",
+        "nom_med": "اسم الدواء (بالفرنسية دائماً)",
+        "cat_label": "الفئة",
+        "sympt_label": "الأعراض / دواعي الاستعمال",
+        "sympt_ph": "مثال: Fièvre, Douleur أو الحمى، الصداع...",
+        "qty_label": "الكمية",
+        "peremp_label": "تاريخ انتهاء الصلاحية",
+        "btn_save": "✅ حفظ",
+        "btn_cancel": "❌ إلغاء",
+        "stock_title": "📦 الفئة :",
+        "no_med": "لا يوجد أي دواء.",
+        "sympt_card": "الأعراض",
+        "cat_card": "الفئة",
+        "qty_card": "الكمية",
+        "peremp_card": "تاريخ الصلاحية",
+        "expired_title": "🚨 أدوية منتهية الصلاحية",
+        "low_qty_title": "📉 أدوية على وشك النفاد",
+        "no_expired": "✅ لا توجد أدوية منتهية الصلاحية.",
+        "no_low": "✅ جميع الكميات متوفرة."
+    }
+else:
+    titre_app = "💊 PHARMACIE"
+    T = {
+        "cat_title": "📌 Catégories",
+        "all_cats": "Toutes les catégories",
+        "add_cat": "➕ Ajouter une catégorie",
+        "del_cat": "🗑️ Supprimer une catégorie",
+        "add_cat_ph": "Nom de la catégorie...",
+        "add_cat_btn": "Valider l'ajout",
+        "del_cat_btn": "Confirmer la suppression",
+        "search_ph": "🔍 Recherche...",
+        "btn_add_med": "➕ Ajouter un nouveau médicament",
+        "form_title": "📝 Formulaire d'ajout de médicament",
+        "nom_med": "Nom du médicament (en Français)",
+        "cat_label": "Catégorie",
+        "sympt_label": "Symptômes / Indications",
+        "sympt_ph": "Ex: Fièvre, Douleur...",
+        "qty_label": "Quantité",
+        "peremp_label": "Date de péremption",
+        "btn_save": "✅ Enregistrer",
+        "btn_cancel": "❌ Annuler",
+        "stock_title": "📦 Catégorie :",
+        "no_med": "Aucun médicament disponible.",
+        "sympt_card": "Symptômes",
+        "cat_card": "Catégorie",
+        "qty_card": "Quantité",
+        "peremp_card": "Péremption",
+        "expired_title": "🚨 Médicaments Expirés",
+        "low_qty_title": "📉 Stock Faible",
+        "no_expired": "✅ Aucun médicament expiré.",
+        "no_low": "✅ Tous les stocks sont suffisants."
+    }
+
+with col_title:
+    st.markdown(f'<div class="header-container"><h1 class="header-title">{titre_app}</h1></div>', unsafe_allow_html=True)
+
+# Synchronisation avec le Cloud
+categories_base = charger_categories_cloud()
 meds_liste = charger_meds_cloud()
 
-# Choix de la langue
-langue = st.sidebar.selectbox("Globe / Langue", ["العربية", "Français"])
-
-# Contenu selon la langue
-if langue == "العربية":
-    st.title("💊 صيدلية المنزل")
-    st.sidebar.header("الفئات")
-    categories = ["جميع الفئات", "أدوية يومية", "أدوية عند الحاجة", "المسكنات", "المضادات الحيوية", "أخرى"]
-    cat_choisie = st.sidebar.radio("اختر الفئة:", categories)
-    
-    st.subheader("إضافة دواء جديد")
-    with st.form("add_form", clear_on_submit=True):
-        nom = st.text_input("اسم الدواء")
-        cat = st.selectbox("الفئة", categories[1:])
-        quantite = st.number_input("الكمية", min_value=1, value=1)
-        peremption = st.date_input("تاريخ انتهاء الصلاحية")
-        submit = st.form_submit_button("إضافة")
-        
-        if submit and nom:
-            nouveau_med = {
-                "nom": nom,
-                "categorie": cat,
-                "quantite": quantite,
-                "peremption": str(peremption)
-            }
-            ajouter_med_cloud(nouveau_med)
-            st.success("تمت إضافة الدواء بنجاح!")
-            st.rerun()
-
-    st.divider()
-    st.subheader(f"قائمة الأدوية ({cat_choisie})")
-
-else:
-    st.title("💊 Pharmacie Maison")
-    st.sidebar.header("Catégories")
-    categories = ["Toutes les catégories", "Quotidien", "Au besoin", "Antidouleurs", "Antibiotiques", "Autres"]
-    cat_choisie = st.sidebar.radio("Choisir une catégorie:", categories)
-    
-    st.subheader("Ajouter un médicament")
-    with st.form("add_form", clear_on_submit=True):
-        nom = st.text_input("Nom du médicament")
-        cat = st.selectbox("Catégorie", categories[1:])
-        quantite = st.number_input("Quantité", min_value=1, value=1)
-        peremption = st.date_input("Date de péremption")
-        submit = st.form_submit_button("Ajouter")
-        
-        if submit and nom:
-            nouveau_med = {
-                "nom": nom,
-                "categorie": cat,
-                "quantite": quantite,
-                "peremption": str(peremption)
-            }
-            ajouter_med_cloud(nouveau_med)
-            st.success("Médicament ajouté avec succès !")
-            st.rerun()
-
-    st.divider()
-    st.subheader(f"Liste des médicaments ({cat_choisie})")
-
-# Affichage des médicaments
 if meds_liste:
-    df = pd.DataFrame(meds_liste)
-    
-    # Filtrage par catégorie
-    if cat_choisie not in ["جميع الفئات", "Toutes les catégories"]:
-        df = df[df['categorie'] == cat_choisie]
-    
-    if not df.empty:
-        for idx, row in df.iterrows():
-            col1, col2, col3 = st.columns([3, 2, 1])
-            with col1:
-                st.write(f"**{row['nom']}** ({row['categorie']})")
-            with col2:
-                st.write(f"Qté: {row['quantite']} | Exp: {row['peremption']}")
-            with col3:
-                if st.button("❌", key=row['id_cloud']):
-                    supprimer_med_cloud(row['id_cloud'])
-                    st.rerun()
-    else:
-        st.info("Aucun médicament dans cette catégorie." if langue == "Français" else "لا يوجد أي دواء في هذه الفئة.")
+    df_meds = pd.DataFrame(meds_liste)
 else:
-    st.info("Aucun médicament enregistré." if langue == "Français" else "لا يوجد أي دواء مسجل.")
+    df_meds = pd.DataFrame(columns=["ID", "Nom", "Categorie", "Symptomes", "Quantite", "Peremption"])
+
+# ---------------------------------------------------------
+# 2. MENU À GAUCHE (SIDEBAR)
+# ---------------------------------------------------------
+st.sidebar.title(T["cat_title"])
+
+if "cat_selectionnee" not in st.session_state:
+    st.session_state.cat_selectionnee = "Toutes les catégories"
+
+for c_fr in categories_base:
+    c_display = TRAD_CATS.get(c_fr, c_fr) if lang == "العربية" else c_fr
+    prefix = "🔹 " if st.session_state.cat_selectionnee == c_fr else ""
+    if st.sidebar.button(f"{prefix}{c_display}", key=f"btn_cat_{c_fr}"):
+        st.session_state.cat_selectionnee = c_fr
+        st.rerun()
+
+st.sidebar.markdown("---")
+
+with st.sidebar.expander(T["add_cat"]):
+    nouvelle_cat = st.text_input("Name", placeholder=T["add_cat_ph"], label_visibility="collapsed", key="input_new_cat")
+    if st.button(T["add_cat_btn"], key="btn_add_cat"):
+        if nouvelle_cat.strip() != "" and nouvelle_cat not in categories_base:
+            categories_base.append(nouvelle_cat)
+            sauvegarder_categories_cloud(categories_base)
+            st.rerun()
+
+with st.sidebar.expander(T["del_cat"]):
+    cats_supprimables = [c for c in categories_base if c != "Toutes les catégories"]
+    cats_supprimables_display = [TRAD_CATS.get(c, c) if lang == "العربية" else c for c in cats_supprimables]
+    
+    if cats_supprimables_display:
+        cat_to_del_display = st.selectbox("Select", cats_supprimables_display, label_visibility="collapsed", key="select_del_cat")
+        if st.button(T["del_cat_btn"], key="btn_del_cat"):
+            cat_to_del_fr = TRAD_CATS.get(cat_to_del_display, cat_to_del_display)
+            if cat_to_del_fr in categories_base:
+                categories_base.remove(cat_to_del_fr)
+                sauvegarder_categories_cloud(categories_base)
+                if st.session_state.cat_selectionnee == cat_to_del_fr:
+                    st.session_state.cat_selectionnee = "Toutes les catégories"
+                st.rerun()
+
+# ---------------------------------------------------------
+# 3. ESPACE PRINCIPAL : RECHERCHE ET FORMULAIRE
+# ---------------------------------------------------------
+symptome_search = st.text_input("Search", placeholder=T["search_ph"], label_visibility="collapsed")
+
+if "afficher_formulaire" not in st.session_state:
+    st.session_state.afficher_formulaire = False
+
+if st.button(T["btn_add_med"]):
+    st.session_state.afficher_formulaire = not st.session_state.afficher_formulaire
+
+if st.session_state.afficher_formulaire:
+    with st.expander(T["form_title"], expanded=True):
+        with st.form("form_ajout_med", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                nom_med = st.text_input(T["nom_med"])
+                cat_choices_fr = [c for c in categories_base if c != "Toutes les catégories"]
+                cat_choices_display = [TRAD_CATS.get(c, c) if lang == "العربية" else c for c in cat_choices_fr]
+                cat_med_display = st.selectbox(T["cat_label"], cat_choices_display)
+                symptomes_med = st.text_area(T["sympt_label"], placeholder=T["sympt_ph"])
+            
+            with col2:
+                quantite_med = st.number_input(T["qty_label"], min_value=1, step=1, value=1)
+                peremption_med = st.date_input(T["peremp_label"])
+            
+            col_save, col_cancel = st.columns(2)
+            with col_save:
+                btn_enregistrer = st.form_submit_button(T["btn_save"])
+            with col_cancel:
+                btn_annuler = st.form_submit_button(T["btn_cancel"])
+            
+            if btn_enregistrer:
+                if nom_med.strip() == "":
+                    st.error("Nom obligatoire.")
+                else:
+                    cat_final_fr = TRAD_CATS.get(cat_med_display, cat_med_display)
+                    nouveau_id = 1 if df_meds.empty else int(df_meds["ID"].max()) + 1
+                    
+                    nouveau_med_dict = {
+                        "ID": nouveau_id,
+                        "Nom": nom_med.strip(),
+                        "Categorie": cat_final_fr,
+                        "Symptomes": symptomes_med.strip(),
+                        "Quantite": int(quantite_med),
+                        "Peremption": str(peremption_med)
+                    }
+                    
+                    # Envoi direct vers Firebase Cloud
+                    sauvegarder_med_cloud(nouveau_med_dict)
+                    st.session_state.afficher_formulaire = False
+                    st.rerun()
+            
+            if btn_annuler:
+                st.session_state.afficher_formulaire = False
+                st.rerun()
+
+st.markdown("---")
+
+# ---------------------------------------------------------
+# 4. STATISTIQUES CLIQUABLES
+# ---------------------------------------------------------
+today_str = datetime.today().strftime('%Y-%m-%d')
+
+df_expired = df_meds[df_meds["Peremption"].astype(str) <= today_str] if not df_meds.empty else pd.DataFrame()
+df_low = df_meds[df_meds["Quantite"].astype(int) <= 2] if not df_meds.empty else pd.DataFrame()
+
+col_stat1, col_stat2 = st.columns(2)
+
+with col_stat1:
+    with st.expander(f"🚨 {T['expired_title']} ({len(df_expired)})"):
+        if df_expired.empty:
+            st.success(T["no_expired"])
+        else:
+            for idx, row in df_expired.iterrows():
+                st.markdown(f"""
+                    <div class="alert-card-expired">
+                        <b style="color:#FCA5A5;">💊 {row['Nom']}</b><br>
+                        📅 <b>{T['peremp_card']}:</b> {row['Peremption']} | 📦 <b>{T['qty_card']}:</b> {row['Quantite']}
+                    </div>
+                """, unsafe_allow_html=True)
+
+with col_stat2:
+    with st.expander(f"📉 {T['low_qty_title']} ({len(df_low)})"):
+        if df_low.empty:
+            st.success(T["no_low"])
+        else:
+            for idx, row in df_low.iterrows():
+                st.markdown(f"""
+                    <div class="alert-card-low">
+                        <b style="color:#FCD34D;">💊 {row['Nom']}</b><br>
+                        📦 <b>{T['qty_card']}:</b> {row['Quantite']} | 📅 <b>{T['peremp_card']}:</b> {row['Peremption']}
+                    </div>
+                """, unsafe_allow_html=True)
+
+st.markdown("---")
+
+# ---------------------------------------------------------
+# 5. LISTE PRINCIPALE DES MÉDICAMENTS
+# ---------------------------------------------------------
+cat_current_display = TRAD_CATS.get(st.session_state.cat_selectionnee, st.session_state.cat_selectionnee) if lang == "العربية" else st.session_state.cat_selectionnee
+st.subheader(f"{T['stock_title']} {cat_current_display}")
+
+df_affiche = df_meds.copy()
+
+if st.session_state.cat_selectionnee != "Toutes les catégories" and not df_affiche.empty:
+    df_affiche = df_affiche[df_affiche["Categorie"] == st.session_state.cat_selectionnee]
+
+if symptome_search.strip() != "" and not df_affiche.empty:
+    query = symptome_search.strip().lower()
+    query_fr = TRAD_MOTS.get(query, query)
+    
+    df_affiche = df_affiche[
+        df_affiche["Nom"].astype(str).str.lower().str.contains(query) |
+        df_affiche["Nom"].astype(str).str.lower().str.contains(query_fr) |
+        df_affiche["Symptomes"].astype(str).str.lower().str.contains(query) |
+        df_affiche["Symptomes"].astype(str).str.lower().str.contains(query_fr)
+    ]
+
+if df_affiche.empty:
+    st.info(T["no_med"])
+else:
+    for idx, row in df_affiche.iterrows():
+        cat_card = TRAD_CATS.get(row['Categorie'], row['Categorie']) if lang == "العربية" else row['Categorie']
+        
+        st.markdown(f"""
+            <div class="med-card">
+                <h3 style="margin:0; color:#60A5FA;">💊 {row['Nom']}</h3>
+                <p style="margin:5px 0;">🎯 <b>{T['sympt_card']} :</b> {row['Symptomes']}</p>
+                <p style="margin:5px 0;">🏷️ <b>{T['cat_card']} :</b> {cat_card}</p>
+                <p style="margin:5px 0;">📦 <b>{T['qty_card']} :</b> {row['Quantite']} | 📅 <b>{T['peremp_card']} :</b> {row['Peremption']}</p>
+            </div>
+        """, unsafe_allow_html=True)
